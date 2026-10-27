@@ -19,6 +19,7 @@ Google Messages for Web is an Angular app built from custom elements (`mws-*`). 
 | `textPart` / `textInner` | `mws-text-message-part` / `.text-msg`, `[data-e2e-text-message-content]` | message text |
 | `timestamp` | `[data-e2e-message-timestamp]`, `mws-relative-timestamp`, `.timestamp`, `time` | times |
 | `skipImg` | avatars, emoji, status, reactions | images that aren't media |
+| `pinned` | `[data-e2e-is-pinned="true"]`, `[aria-label*="Pinned" i]` (both seen live, 2026-10-27), and icon/title fallbacks | a pinned chat in the list |
 
 Other markup the code relies on outside `SEL` (worth moving into it, see [[Known issues]]): `mws-image-message-part`, `mws-reactions`, `mws-message-status`, `mws-rich-link-preview-part`, `mws-spinner` (loading older messages), the conversation's menu and Details page (contact card), the full-size photo viewer, `mws-avatar` / canvas avatars.
 

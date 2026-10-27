@@ -12,6 +12,10 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Texts need a phone line, but the app installs anywhere: on a device without
+         one there's simply nothing to back up. -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
     <uses-permission android:name="android.permission.READ_SMS" />
     <!-- Backing up: chats are named as in the phone's contacts (optional). -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />

@@ -29,9 +29,9 @@
     textInner: '.text-msg, [data-e2e-text-message-content]',
     timestamp: '[data-e2e-message-timestamp], mws-relative-timestamp, .timestamp, time',
     skipImg: 'mws-avatar, [class*="avatar"], [class*="emoji"], mws-message-status, mws-reactions, [class*="reaction"]',
-    // A pinned chat in the list: its pin icon (by name, as Google's icons are
-    // marked) or a "Pinned" label. Not yet checked against the live page; the
-    // item's aria-label is checked for "Pinned" too.
+    // A pinned chat in the list. On the live page (checked 2026-10-27) a pinned
+    // item has data-e2e-is-pinned="true" and a "Pinned" aria-label; the icon
+    // and title forms are fallbacks. isPinned() also reads the item's own label.
     pinned: '[data-mat-icon-name="push_pin"], [data-mat-icon-name="keep"], [aria-label*="Pinned" i], [title*="Pinned" i], [data-e2e-is-pinned="true"]',
   };
 

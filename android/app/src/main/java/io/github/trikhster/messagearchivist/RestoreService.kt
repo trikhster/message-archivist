@@ -197,6 +197,8 @@ class RestoreService : Service() {
          */
         fun ownNumber(ctx: Context): String? {
             // Two ways, each allowed in different cases: tried one after the other.
+            // Both are inside try: a refused permission is a SecurityException, caught here.
+            @Suppress("MissingPermission")
             val viaSubscription = if (Build.VERSION.SDK_INT >= 33) try {
                 ctx.getSystemService(android.telephony.SubscriptionManager::class.java)
                     .getPhoneNumber(android.telephony.SubscriptionManager.getDefaultSmsSubscriptionId())

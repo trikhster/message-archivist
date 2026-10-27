@@ -3,8 +3,6 @@
     <string name="app_name">Message Archivist</string>
 
     <!-- Welcome -->
-    <string name="welcome_title">Back up and restore your texts</string>
-    <string name="welcome_text">Every chat, in order, with its photos and videos. Start here: back this phone up, then add the file to your computer backup.</string>
     <string name="restore_card">Restore a backup</string>
     <string name="backup_card">Back up this phone</string>
     <string name="backup_card_text">Saves every text and picture message on this phone to one file, on the phone or Google Drive, in minutes. It can keep that file up to date every day, and your computer backup can start from it.</string>
@@ -73,13 +71,9 @@
     <string name="photos_waiting">Made without photos: %1$s photos and videos can be added later (Update a backup, with photos on).</string>
     <string name="daily_title">Back up every day</string>
     <string name="daily_text">Keeps “%1$s” up to date: about once a day, in the background, adding only what’s new.</string>
-    <string name="daily_on">Backed up every day to “%1$s”</string>
-    <string name="daily_last">Last backup %1$s · %2$s new</string>
     <string name="daily_last_error">Last try %1$s: %2$s</string>
-    <string name="daily_soon">The first daily backup runs within a day.</string>
     <string name="back_up_now">Back up now</string>
     <string name="just_now">just now</string>
-    <string name="turn_off">Turn off</string>
     <string name="daily_failed">Backup didn’t run</string>
     <string name="daily_done">Backup up to date</string>
 
