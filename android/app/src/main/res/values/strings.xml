@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Message Archivist</string>
+
+    <!-- Welcome -->
+    <string name="welcome_title">Back up and restore your texts</string>
+    <string name="welcome_text">Every chat, in order, with its photos and videos. Start here: back this phone up, then add the file to your computer backup.</string>
+    <string name="restore_card">Restore a backup</string>
+    <string name="backup_card">Back up this phone</string>
+    <string name="backup_card_text">Saves every text and picture message on this phone to one file, on the phone or Google Drive, in minutes. It can keep that file up to date every day, and your computer backup can start from it.</string>
+    <string name="step1">Have a backup file</string>
+    <string name="step1_text">One made here with Back up this phone, or from the extension: Settings → Phone restore → Make the restore file.</string>
+    <string name="step2">Copy it to this phone</string>
+    <string name="step2_text">With a USB cable, Google Drive, or however you usually move files.</string>
+    <string name="step3">Choose it here</string>
+    <string name="step3_text">You’ll see what’s in it before anything on the phone changes.</string>
+    <string name="choose">Choose restore file</string>
+    <string name="choose_other">Choose another file</string>
+    <string name="reading_file">Reading the restore file…</string>
+    <string name="counting">Counting this phone’s messages…</string>
+
+    <!-- Review -->
+    <string name="backup_from">Backup from %1$s</string>
+    <string name="stat_messages">messages</string>
+    <string name="stat_chats">chats</string>
+    <string name="stat_photos">photos &amp; videos</string>
+    <string name="restore_time">About %1$s to restore</string>
+    <string name="less_than_minute">a minute</string>
+    <string name="n_minutes">%1$d minutes</string>
+    <string name="n_hours">%1$s hours</string>
+    <string name="chats_header">Chats to restore</string>
+    <string name="select_all">Select all</string>
+    <string name="chat_line">%1$s messages · %2$s</string>
+    <string name="group">Group</string>
+    <string name="sms_role_title">Message Archivist becomes your SMS app while it restores</string>
+    <string name="sms_role_text">Android only lets the SMS app add messages. At the end you switch back to Google Messages. Texts that arrive meanwhile are kept, and Google Messages fetches picture messages afterwards. Nothing already on this phone is added twice.</string>
+    <string name="self_title">Your phone number</string>
+    <string name="self_text">For group chats: a message you received in a group lists everyone it went to, you included, and this phone doesn’t say its own number. Leave it empty to go ahead without it (group messages you received would show as separate chats).</string>
+    <string name="self_hint">e.g. +1 555 123 4567</string>
+    <string name="restore_n">Restore %1$s messages</string>
+    <string name="none_selected">Choose at least one chat</string>
+
+    <!-- Backup -->
+    <string name="phone_title">This phone</string>
+    <string name="phone_sub">All of it goes into one file you choose where to keep.</string>
+    <string name="backup_media">Include photos and videos</string>
+    <string name="backup_media_text">The file is bigger, but it’s a complete copy.</string>
+    <string name="backup_what_title">What’s in a backup</string>
+    <string name="backup_what_text">Texts, picture messages and group chats, with their exact times. Chat (RCS) messages are in it as Google Messages keeps them on the phone; at the moment it doesn’t keep some you send, so those can be missing.</string>
+    <string name="save_backup">Save backup</string>
+    <string name="back">Back</string>
+    <string name="no_messages">There are no texts on this phone to back up.</string>
+    <string name="needs_read_sms_title">Message Archivist can’t read your texts</string>
+    <string name="needs_read_sms">To back them up it needs the SMS permission. Allow it in the app’s settings, then try again.</string>
+    <string name="app_settings">App settings</string>
+    <string name="backup_file_name">messages-backup-%1$s.tar</string>
+    <string name="backing_up">Backing up messages</string>
+    <string name="backing_up_pct">Backing up messages · %1$d%%</string>
+    <string name="backup_done">Backup saved</string>
+    <string name="backup_stopped">Backup stopped</string>
+    <string name="backup_failed">Backup didn’t finish</string>
+    <string name="backup_done_sub">%1$s messages from %2$s chats, saved to “%3$s” (%4$s).</string>
+    <string name="backup_stopped_sub">“%1$s” has the %2$s chats saved before you stopped. Back up again for all of them.</string>
+    <string name="backup_media_failed">%1$s photos or videos couldn’t be read and were left out.</string>
+    <string name="backup_line">%1$s messages from %2$s chats in “%3$s”.</string>
+    <string name="backup_next_title">Next: your computer backup</string>
+    <string name="backup_next_text">Copy the file to your computer (or keep it on Google Drive), then in the Message Archivist extension for Chrome: Settings → Tools → Bring in a phone backup. From then on the extension keeps it up to date from Google Messages for Web, including chat messages the phone doesn’t keep. To put it back on a phone, open it here.</string>
+    <string name="update_existing">Update a backup instead…</string>
+    <string name="update_existing_text">Pick a backup made before: only what’s new is added, such as today’s messages, or its photos if it was made without them.</string>
+    <string name="backup_updated">Backup updated</string>
+    <string name="backup_updated_sub">%1$s new messages and %2$s photos added to “%3$s”, which now has %4$s messages from %5$s chats (%6$s).</string>
+    <string name="update_line">%1$s new messages added to “%2$s”.</string>
+    <string name="photos_waiting">Made without photos: %1$s photos and videos can be added later (Update a backup, with photos on).</string>
+    <string name="daily_title">Back up every day</string>
+    <string name="daily_text">Keeps “%1$s” up to date: about once a day, in the background, adding only what’s new.</string>
+    <string name="daily_on">Backed up every day to “%1$s”</string>
+    <string name="daily_last">Last backup %1$s · %2$s new</string>
+    <string name="daily_last_error">Last try %1$s: %2$s</string>
+    <string name="daily_soon">The first daily backup runs within a day.</string>
+    <string name="back_up_now">Back up now</string>
+    <string name="just_now">just now</string>
+    <string name="turn_off">Turn off</string>
+    <string name="daily_failed">Backup didn’t run</string>
+    <string name="daily_done">Backup up to date</string>
+
+    <!-- Home -->
+    <string name="home_safe">Your texts are backed up</string>
+    <string name="home_safe_when">Last backup %1$s, to “%2$s”.</string>
+    <string name="home_soon">Backing up %1$s to “%2$s”. The first one runs soon.</string>
+    <string name="home_problem">The last backup didn’t work</string>
+    <string name="home_auto_on">Automatic backup is on</string>
+    <string name="home_not_yet">Your texts aren’t backed up yet</string>
+    <string name="home_not_yet_text">Back this phone up in a few minutes, then keep it up to date by itself.</string>
+    <string name="home_counts">%1$s messages · %2$s chats · %3$s photos and videos on this phone</string>
+    <string name="settings">Settings</string>
+    <string name="home_every_12">every 12 hours</string>
+    <string name="home_every_24">every day</string>
+    <string name="home_every_168">every week</string>
+    <string name="navigate_back">Back</string>
+
+    <!-- Settings -->
+    <string name="s_auto">Automatic backup</string>
+    <string name="s_auto_on">Back up by itself</string>
+    <string name="s_auto_on_text">Adds what’s new to your backup file, in the background.</string>
+    <string name="s_auto_choose">Turning it on makes a backup now, then keeps it up to date. Where should it go?</string>
+    <string name="s_new_file">New file…</string>
+    <string name="s_existing_file">A backup I already have…</string>
+    <string name="s_file">Backup file</string>
+    <string name="s_change">Change</string>
+    <string name="s_on_phone">On this phone</string>
+    <string name="s_online">Online (Google Drive or similar): sent whole each time</string>
+    <string name="s_how_often">How often</string>
+    <string name="s_every_12">12 hours</string>
+    <string name="s_every_24">Day</string>
+    <string name="s_every_168">Week</string>
+    <string name="s_media">Include photos and videos</string>
+    <string name="s_media_text">Off makes a smaller file; photos can be added later.</string>
+    <string name="s_charging">Only while charging</string>
+    <string name="s_charging_text">Waits until the phone is plugged in.</string>
+    <string name="s_wifi">Only on Wi-Fi</string>
+    <string name="s_wifi_text">For a file on Google Drive or another online place, so it doesn’t use mobile data.</string>
+    <string name="s_notify">Tell me after each backup</string>
+    <string name="s_notify_text">A quiet notification with how many messages were added. Problems are always shown.</string>
+    <string name="s_last">Last backup</string>
+    <string name="s_never">Not run yet</string>
+    <string name="s_last_line">%1$s · %2$s new messages</string>
+    <string name="s_about">About</string>
+    <string name="s_version">Version %1$s</string>
+    <string name="s_privacy">No internet access: your messages only go where you save the file.</string>
+    <string name="s_permissions">App permissions</string>
+    <string name="s_permissions_text">Texts, contacts and notifications, in Android’s settings.</string>
+    <string name="daily_no_permission">Message Archivist isn’t allowed to read your texts any more. Open it and allow it.</string>
+    <string name="share">Share</string>
+    <string name="done">Done</string>
+
+    <!-- Progress -->
+    <string name="restoring">Restoring messages</string>
+    <string name="restoring_pct">Restoring messages · %1$d%%</string>
+    <string name="getting_ready">Getting ready…</string>
+    <string name="progress_line">%1$s of %2$s · %3$s</string>
+    <string name="of_total">%1$s of %2$s</string>
+    <string name="count_texts">texts</string>
+    <string name="count_pictures">picture &amp; group</string>
+    <string name="count_already">already here</string>
+    <string name="time_left">About %1$s left</string>
+    <string name="leave_ok">You can leave this screen: it keeps going and shows its progress in a notification.</string>
+    <string name="stop">Stop</string>
+    <string name="stopping">Stopping…</string>
+
+    <!-- Done -->
+    <string name="done_title">Your messages are back</string>
+    <string name="stopped_title">Restore stopped</string>
+    <string name="failed_title">Couldn’t finish the restore</string>
+    <string name="done_sub">%1$s messages restored to this phone.</string>
+    <string name="stopped_sub">%1$s messages restored. Restore again to carry on: nothing is added twice.</string>
+    <string name="nothing_new_title">Already on this phone</string>
+    <string name="nothing_new_sub">All %1$s messages were here already, so nothing was added twice.</string>
+    <string name="failed_count">%1$s couldn’t be added.</string>
+    <string name="switch_title">One more step</string>
+    <string name="switch_text">Make Google Messages your SMS app again, so texts and picture messages work as usual.</string>
+    <string name="open_messages">Switch back to Google Messages</string>
+    <string name="open_default_apps">Choose SMS app in Settings</string>
+    <string name="all_set_title">You’re all set</string>
+    <string name="all_set">Google Messages is your SMS app again.</string>
+    <string name="restore_again">Restore again</string>
+    <string name="try_again">Try again</string>
+
+    <!-- The SMS app banner -->
+    <string name="still_default_title">Message Archivist is still your SMS app</string>
+    <string name="still_default_text">Switch back to Google Messages to send texts and get picture messages.</string>
+    <string name="switch_back">Switch back</string>
+
+    <!-- Problems -->
+    <string name="needs_default">Message Archivist needs to be your SMS app while it restores. Tap Restore and choose Message Archivist.</string>
+    <string name="not_default">Message Archivist isn’t your SMS app, so Android won’t let it add messages.</string>
+
+    <!-- Notifications -->
+    <string name="channel_progress">Restore progress</string>
+    <string name="channel_alerts">Restore or backup finished, and texts that arrive during a restore</string>
+    <string name="restore_done">Restore finished</string>
+    <string name="restore_failed">Restore didn’t finish</string>
+    <string name="done_line">%1$s messages restored. Switch back to Google Messages to finish.</string>
+    <string name="incoming_title">New text during the restore</string>
+    <string name="incoming_text">From %1$s. It’s saved, and shows in Google Messages once that’s your SMS app again.</string>
+    <string name="incoming_mms_title">Picture message during the restore</string>
+    <string name="incoming_mms_text">Google Messages fetches it once it’s your SMS app again. If it doesn’t appear, ask the sender to send it again.</string>
+    <string name="cant_send_title">Message Archivist doesn’t send texts</string>
+    <string name="cant_send">It only puts backups back on this phone. To send texts, make Google Messages your SMS app again.</string>
+</resources>

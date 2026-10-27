@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Message Archivist: the extension's speech bubble (icons/icon.svg), white with
+  Google-blue dots, and a backup-and-restore badge (Material "history") at its
+  corner. Everything that matters sits inside the 66 dp circle every launcher shows.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="22" android:translateY="17" android:scaleX="0.5" android:scaleY="0.5">
+        <path android:fillColor="#FFFFFF" android:pathData="M64 12C32.5 12 8 32.6 8 58c0 13.4 6.9 25.4 18 33.6L19 116l29.4-14.8c5 1.2 10.2 1.8 15.6 1.8 31.5 0 56-20.6 56-45.5S95.5 12 64 12z" />
+        <path android:fillColor="#0B57D0" android:pathData="M30,58a9,9 0 1,0 18,0a9,9 0 1,0 -18,0zM55,58a9,9 0 1,0 18,0a9,9 0 1,0 -18,0zM80,58a9,9 0 1,0 18,0a9,9 0 1,0 -18,0z" />
+    </group>
+    <!-- The badge: a ring of the background colour parts it from the bubble. -->
+    <path android:fillColor="#0B57D0" android:pathData="M69,53.5a14.5,14.5 0 1,0 0.01,0z" />
+    <path android:fillColor="#D3E3FD" android:pathData="M69,56a12,12 0 1,0 0.01,0z" />
+    <group android:translateX="60.5" android:translateY="59.5" android:scaleX="0.7" android:scaleY="0.7">
+        <path android:fillColor="#0B57D0" android:pathData="M13,3c-4.97,0 -9,4.03 -9,9L1,12l3.89,3.89 0.07,0.14L9,12L6,12c0,-3.87 3.13,-7 7,-7s7,3.13 7,7 -3.13,7 -7,7c-1.93,0 -3.68,-0.79 -4.94,-2.06l-1.42,1.42C8.27,19.99 10.51,21 13,21c4.97,0 9,-4.03 9,-9s-4.03,-9 -9,-9zM12,8v5l4.28,2.54 0.72,-1.21 -3.5,-2.08L13.5,8L12,8z" />
+    </group>
+</vector>

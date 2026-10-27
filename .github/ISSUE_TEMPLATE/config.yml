@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/trikhster/message-archivist/security/advisories/new
+    about: For anything that could expose messages or let another site control the extension.
+  - name: User guide
+    url: https://github.com/trikhster/message-archivist/blob/main/extension/README.md
+    about: How to set up, back up, check and read your messages.

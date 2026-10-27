@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="theme.css">
+  <style>
+    body { width: 360px; background: var(--surface); }
+    .wrap { padding: 4px 16px 16px; }
+    header { display: flex; align-items: center; gap: 10px; height: 56px; }
+    header .logo { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--primary-container); font-size: 20px; }
+    header h1 { font-size: 18px; flex: 1; }
+    .section { background: var(--bg); border-radius: 16px; padding: 14px 16px; margin-top: 10px; }
+    .setup { background: var(--primary-container); color: var(--on-primary-container); }
+    .setup p { margin: 0 0 10px; }
+    .setup .title { font: 500 16px/22px var(--font-display); margin-bottom: 6px; }
+    .setup .step { font-size: 12px; font-weight: 500; letter-spacing: .3px; text-transform: uppercase; opacity: .8; margin-bottom: 2px; }
+    .setup ol { margin: 0 0 10px; padding-left: 20px; } .setup li { margin: 4px 0; }
+    .chat { display: flex; gap: 12px; align-items: center; }
+    .chat .avatar { background: var(--c2); overflow: hidden; }
+    .chat .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .chat .name { font: 500 16px/22px var(--font-display); }
+    #chatStatus.ok { color: var(--success); }
+    #chatStatus.warn { color: var(--warning); }
+    .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .buttons .grow { flex: 1; }
+    .row select { flex: 1; min-width: 0; }
+    details.more { margin-top: 10px; }
+    details.more > summary { list-style: none; cursor: pointer; padding: 10px 16px; border-radius: 16px; background: var(--bg); font: 500 14px var(--font-display); color: var(--text-2); }
+    details.more > summary::-webkit-details-marker { display: none; }
+    details.more > summary::after { content: '▾'; float: right; }
+    details.more[open] > summary { border-radius: 16px 16px 0 0; }
+    details.more[open] > summary::after { content: '▴'; }
+    details.more .section { margin-top: 0; border-radius: 0; border-top: 1px solid var(--divider); }
+    details.more .section:last-child { border-radius: 0 0 16px 16px; }
+    .check { margin: 8px 0; }
+    .photos { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--divider); }
+    .photos .buttons { margin-top: 8px; }
+    .dates { margin-top: 8px; }
+    .dates input { width: 140px; }
+    .panel { margin-top: 10px; padding: 12px; border-radius: 12px; background: color-mix(in srgb, var(--error) 10%, var(--bg)); }
+    .panel p { margin: 0 0 8px; }
+    #limit { width: 72px; }
+    #status { margin-top: 10px; min-height: 20px; padding: 0 4px; }
+    #status.error { color: var(--error); }
+    .section, .buttons { animation: gm-rise var(--dur-3) var(--ease-out) both; }
+    #chatCard { animation-delay: 30ms; } #libButtons { animation-delay: 60ms; }
+    #status:not(:empty) { animation: gm-fade var(--dur-2) var(--ease) both; }
+    .avatar { transition: background-color var(--dur-2) var(--ease); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="logo">💬</span>
+    <h1>Message Archivist</h1>
+    <button class="icon" id="themeBtn"></button>
+    <button class="icon" id="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84a.48.48 0 00-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 00-.59.22L2.74 8.87a.47.47 0 00.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 00-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/></svg></button>
+  </header>
+
+  <!-- What to do next, when the chat card can't be used yet. -->
+  <div class="section setup" id="guide" hidden>
+    <div class="step" id="guideStep"></div>
+    <p class="title" id="guideTitle"></p>
+    <p id="guideText"></p>
+    <button class="filled" id="guideBtn" hidden></button>
+  </div>
+
+  <div class="section" id="chatCard">
+    <div class="chat">
+      <span class="avatar" id="chatAvatar">?</span>
+      <div style="min-width:0">
+        <div class="name" id="chatName">No conversation open</div>
+        <div class="secondary" id="chatStatus"></div>
+      </div>
+    </div>
+    <div class="buttons">
+      <button id="current" class="filled grow">Back up this chat</button>
+      <button id="analyze" class="tonal" title="Search this chat and see statistics, without saving anything">Search &amp; stats</button>
+    </div>
+    <label class="label" for="every" style="display:block;margin-top:14px">Keep this chat backed up automatically</label>
+    <div class="row">
+      <select id="every" title="How often this chat is backed up by itself, while Google Messages is open in Chrome">
+        <option value="off">No</option>
+        <option value="1">Every hour</option>
+        <option value="6">Every 6 hours</option>
+        <option value="24">Every day</option>
+        <option value="168">Every week</option>
+        <option value="0">Only when I click “Back up all now”</option>
+      </select>
+    </div>
+    <!-- Every photo and video in this chat's backup, by status, and what can be done about them. -->
+    <div id="photos" class="photos" hidden>
+      <div class="label">Photos and videos in the backup</div>
+      <div id="photosText" class="secondary"></div>
+      <div class="buttons"><button id="fetchPhotos" class="tonal small" hidden></button><button id="upgradePhotos" class="outlined small" hidden></button></div>
+    </div>
+    <div class="row" id="labelsRow" style="margin-top:10px" hidden><button id="editLabels" class="small" title="Label this chat (Favorites, Family, Spam…) and review its flagged messages, in your backup">🏷 Labels and flags…</button></div>
+    <div class="secondary" id="where" style="margin-top:8px"></div>
+  </div>
+
+  <div class="buttons" id="libButtons" hidden>
+    <button id="openBackup" class="tonal grow">Open my backup</button>
+    <button id="allQuick" class="outlined grow">Back up everything…</button>
+  </div>
+
+  <details class="more" id="more">
+    <summary>More options</summary>
+    <div class="section">
+      <div class="label">What to save <span class="secondary">(the same as in Settings)</span></div>
+      <div class="check"><input type="checkbox" id="includeMedia" checked><label for="includeMedia">Photos, GIFs, videos and audio</label></div>
+      <div class="check"><input type="checkbox" id="fullSize" checked><label for="fullSize">Full-size photos <span class="secondary">Opens each photo in Messages’ viewer (slower). Off saves the chat thumbnails.</span></label></div>
+    </div>
+    <div class="section">
+      <div class="label">A date range, as a separate zip</div>
+      <div class="row">
+        <select id="range" title="Date range">
+          <option value="all">Choose a range…</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 3 months</option>
+          <option value="365">Last 12 months</option>
+          <option value="year">This year</option>
+          <option value="lastyear">Last year</option>
+          <option value="custom">Custom dates…</option>
+        </select>
+        <button id="rangeBtn" class="outlined" disabled>Download</button>
+      </div>
+      <div class="secondary" id="rangeLabel" style="margin-top:6px"></div>
+      <div class="row dates" id="customDates" hidden>
+        <input type="date" id="from" aria-label="From"> <span class="gray">to</span> <input type="date" id="to" aria-label="To">
+      </div>
+    </div>
+    <div class="section">
+      <div class="label">Every conversation</div>
+      <button id="all" class="outlined">Back up everything…</button>
+      <div id="allPanel" class="panel" hidden>
+        <p><b>This is a big job.</b> Each conversation is opened in turn and read back to its first message. With lots of chats it takes hours, and your phone has to stay online. It can be stopped and carried on later, and at the end every conversation is checked against the backup.</p>
+        <div class="row">Most recent <input type="number" id="limit" min="1" value="10"> conversations</div>
+        <div class="check"><input type="checkbox" id="everything"><label for="everything">Every conversation instead</label></div>
+        <div class="check"><input type="checkbox" id="ack"><label for="ack">I understand. I’ll keep the tab open and confirm on the page.</label></div>
+        <div class="buttons"><button id="allStart" class="danger" disabled>Find conversations</button><button id="allCancel">Never mind</button></div>
+      </div>
+    </div>
+    <div class="section">
+      <button id="diagnose" class="small">Copy page diagnostics</button>
+      <span class="secondary">Page structure only, with message text masked.</span>
+    </div>
+  </details>
+  <div id="status"></div>
+</div>
+<script src="theme.js"></script>
+<script src="library.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

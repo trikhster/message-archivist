@@ -1,0 +1,291 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Message Archivist settings</title>
+  <link rel="icon" href="icons/icon32.png">
+  <link rel="stylesheet" href="theme.css">
+  <style>
+    body { background: var(--surface); }
+    main { max-width: 880px; margin: 0 auto; padding: 8px 16px 64px; }
+    header { display: flex; align-items: center; gap: 14px; height: 72px; }
+    header .logo { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: var(--primary-container); font-size: 24px; }
+    header .titles { flex: 1; }
+    .card { margin-bottom: 16px; padding: 20px 24px; border: 0; border-radius: 24px; }
+    .card h2 { margin-bottom: 2px; }
+    .card > .secondary { margin-bottom: 14px; display: block; font-size: 13px; line-height: 18px; }
+    #subfolder { width: 220px; }
+    .sub-h { font-size: 15px; margin: 20px 0 2px; }
+    .home-status { font-size: 15px; line-height: 22px; }
+    .home-status .big { font: 400 22px/30px var(--font-display); color: var(--text); }
+    details.advanced > summary { list-style: none; cursor: pointer; }
+    details.advanced > summary::-webkit-details-marker { display: none; }
+    details.advanced > summary h2::after { content: ' ▾'; color: var(--muted); }
+    details.advanced[open] > summary h2::after { content: ' ▴'; }
+    .steps li .detail { margin-top: 8px; }
+    .check-item { display: flex; gap: 8px; margin: 4px 0; font-size: 13px; }
+    .check-item .lv { width: 16px; flex: none; text-align: center; }
+    .check-item .lv.ok { color: var(--success); } .check-item .lv.warn { color: var(--warning); } .check-item .lv.bad { color: var(--error); }
+    .coverage { background: var(--surface-1); border-radius: 16px; padding: 12px 16px; margin-bottom: 12px; }
+    #deleteDlg { max-width: 520px; border: 0; padding: 24px; margin: auto; }
+    #deleteDlg::backdrop { background: rgba(0,0,0,.4); }
+    button.danger { background: var(--error); color: var(--bg); }
+    td.del { text-align: right; }
+    td.media-cell { min-width: 180px; }
+    .media-cell .ok, .health-summary span.ok { color: var(--success); } .media-cell .warn, .health-summary span.warn { color: var(--warning); }
+    .coverage ul { margin: 6px 0 0; padding-left: 20px; max-height: 160px; overflow-y: auto; }
+    #caseNote { width: 100%; margin-top: 6px; }
+    table { width: 100%; }
+    td.actions { white-space: nowrap; text-align: right; }
+    td.actions button + button { margin-left: 4px; }
+    td select { width: 150px; }
+    .bad { color: var(--error); }
+    .run { border-bottom: 1px solid var(--divider); padding: 10px 0; }
+    .run:last-child { border-bottom: 0; }
+    .run summary { cursor: pointer; display: flex; gap: 12px; align-items: center; list-style: none; }
+    .run summary::-webkit-details-marker { display: none; }
+    .run summary .when { color: var(--muted); font-size: 12px; min-width: 130px; }
+    .run summary .what { flex: 1; }
+    .run pre { background: var(--surface-1); border-radius: 12px; padding: 10px 12px; max-height: 360px; overflow: auto; font: 11px/16px 'Roboto Mono', Menlo, monospace; white-space: pre-wrap; }
+    .empty { color: var(--muted); padding: 8px 0; }
+    .welcome { border: 2px solid var(--primary); }
+    .steps { margin: 4px 0 0; padding-left: 22px; }
+    .steps li { margin: 10px 0; color: var(--text-2); }
+    .steps li b { color: var(--text); }
+    .steps li.done b::after { content: ' ✓'; color: var(--success); }
+    .steps .detail { margin-top: 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    #folderAccess.ok { color: var(--success); }
+    .pill-status { display: inline-block; padding: 1px 10px; border-radius: 10px; font-size: 12px; font-weight: 500; }
+    .pill-status.ok { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+    .pill-status.warn { background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning); }
+    .pill-status.bad { background: color-mix(in srgb, var(--error) 15%, transparent); color: var(--error); }
+    #health table td, #health table th { font-size: 13px; }
+    .health-summary { margin: 4px 0 12px; }
+    .add-panel { background: var(--surface-1); border-radius: 16px; padding: 12px; margin-bottom: 12px; }
+    .chat-pick { max-height: 320px; overflow-y: auto; background: var(--bg); border-radius: 12px; }
+    .chat-pick label { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--divider); cursor: pointer; }
+    .chat-pick label:last-child { border-bottom: 0; }
+    .chat-pick .when { margin-left: auto; color: var(--muted); font-size: 12px; }
+    .chat-pick input:disabled + span { color: var(--muted); }
+    #folderAccess.warn { color: var(--warning); }
+    #toast { position: fixed; bottom: 24px; left: 50%; translate: -50% 0; background: var(--tooltip); color: var(--on-tooltip); padding: 12px 16px; border-radius: 4px; box-shadow: var(--shadow-2); display: none; }
+
+    /* 5.0: tabs, the backup index, basic/advanced settings */
+    header { position: sticky; top: 0; z-index: 5; background: var(--surface); }
+    nav.tabs { display: flex; gap: 4px; margin: 0 0 16px; padding: 4px; border-radius: 28px; background: var(--surface-1); overflow-x: auto; position: sticky; top: 72px; z-index: 5; }
+    nav.tabs button { flex: 1 0 auto; height: 40px; border-radius: 20px; padding: 0 18px; color: var(--text-2); transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }
+    nav.tabs button[aria-selected="true"] { background: var(--bg); color: var(--primary); box-shadow: var(--shadow-1); }
+    nav.tabs .badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: var(--error); color: var(--bg); font-size: 11px; }
+    .tab[hidden] { display: none; }
+    .tab:not([hidden]) > .card { animation: gm-rise var(--dur-3) var(--ease-out) both; }
+    .tab:not([hidden]) > .card:nth-child(2) { animation-delay: 40ms; } .tab:not([hidden]) > .card:nth-child(3) { animation-delay: 80ms; } .tab:not([hidden]) > .card:nth-child(4) { animation-delay: 120ms; }
+    .index-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 10px; }
+    .index-tools input[type="search"] { flex: 1 1 220px; height: 40px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+    .chips button { height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--outline); color: var(--text-2); font-size: 13px; transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease); }
+    .chips button[aria-pressed="true"] { background: var(--primary-container); color: var(--on-primary-container); border-color: transparent; }
+    .chips button .n { opacity: .7; margin-left: 4px; }
+    .fixbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 14px; margin: 0 0 12px; border-radius: 16px; background: color-mix(in srgb, var(--warning) 10%, var(--bg)); }
+    .fixbar:empty { display: none; }
+    #index table td, #index table th { font-size: 13px; vertical-align: top; }
+    #index tr.chat-row { cursor: pointer; transition: background-color var(--dur-1) var(--ease); }
+    #index tr.chat-row:hover td { background: var(--surface-1); }
+    #index tr.checks td { background: var(--surface-1); padding: 8px 12px 12px; animation: gm-fade var(--dur-2) var(--ease) both; }
+    #index table { table-layout: auto; }
+    #index .c-chat { min-width: 160px; overflow-wrap: break-word; }
+    #index td.media-cell { min-width: 120px; }
+    @media (max-width: 720px) { #index .media-cell { display: none; } }
+    #index td select { width: 128px; }
+    #index td.actions { width: 1%; }
+    #index .c-chat b { font-weight: 500; }
+    #index td.num { white-space: nowrap; }
+    .row-menu { display: inline-block; position: relative; }
+    .row-menu > summary { list-style: none; cursor: pointer; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 16px; color: var(--text-2); }
+    .row-menu > summary::-webkit-details-marker { display: none; }
+    .row-menu > summary:hover { background: var(--surface-2); }
+    .row-menu .menu { position: absolute; right: 0; top: 36px; z-index: 4; min-width: 200px; padding: 6px 0; border-radius: 12px; background: var(--bg); box-shadow: var(--shadow-2); text-align: left; animation: gm-pop var(--dur-2) var(--ease-out) both; transform-origin: top right; }
+    .row-menu .menu button { display: block; width: 100%; height: 36px; border-radius: 0; padding: 0 16px; text-align: left; justify-content: flex-start; }
+    .row-menu .menu button.danger-text { color: var(--error); }
+    .more-rows { width: 100%; margin-top: 8px; }
+    .seg { display: inline-flex; padding: 4px; border-radius: 22px; background: var(--surface-1); margin-bottom: 8px; }
+    .seg button { height: 36px; border-radius: 18px; padding: 0 18px; color: var(--text-2); transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }
+    .seg button[aria-pressed="true"] { background: var(--bg); color: var(--primary); box-shadow: var(--shadow-1); }
+    .setting { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid var(--divider); align-items: start; }
+    .setting:last-child { border-bottom: 0; }
+    .setting > .name b { display: block; font-weight: 500; }
+    .setting > .name .secondary { display: block; margin-top: 2px; font-size: 12px; line-height: 16px; }
+    .setting .check { margin: 0; }
+    .setting select { min-width: 240px; }
+    @media (max-width: 640px) { .setting { grid-template-columns: 1fr; } }
+    .settings-list[hidden] { display: none; }
+    .settings-list:not([hidden]) { animation: gm-fade var(--dur-2) var(--ease) both; }
+    .ready { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin: 10px 0 14px; }
+    .ready .tile { background: var(--surface-1); border-radius: 16px; padding: 12px 14px; }
+    .ready .tile b { display: block; font: 400 22px/28px var(--font-display); color: var(--text); }
+    .ready .tile.warn b { color: var(--warning); }
+    .skeleton { height: 14px; margin: 10px 0; border-radius: 7px; background: linear-gradient(90deg, var(--surface-1) 25%, var(--surface-2) 50%, var(--surface-1) 75%); background-size: 200% 100%; animation: gm-shimmer 1.2s linear infinite; }
+    .skeleton.w60 { width: 60%; } .skeleton.w80 { width: 80%; }
+    #toast { animation: gm-toast var(--dur-3) var(--ease-out) both; }
+    #deleteDlg[open] { animation: gm-pop var(--dur-3) var(--ease-out) both; }
+    #deleteDlg[open]::backdrop { animation: gm-fade var(--dur-3) var(--ease) both; }
+    .run pre:empty::before { content: 'Loading…'; color: var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <header><span class="logo">💬</span><div class="titles"><h1>Message Archivist</h1><div class="secondary" id="version"></div></div><button class="icon" id="themeBtn"></button></header>
+  <nav class="tabs" role="tablist" aria-label="Settings sections">
+    <button role="tab" data-tab="home" aria-selected="true">Home</button>
+    <button role="tab" data-tab="backups">Backups<span class="badge" id="backupsBadge" hidden></span></button>
+    <button role="tab" data-tab="restore">Phone restore</button>
+    <button role="tab" data-tab="tools">Tools</button>
+    <button role="tab" data-tab="settings">Settings</button>
+  </nav>
+
+  <!-- ===================== Home ===================== -->
+  <div class="tab" id="tab-home" role="tabpanel">
+    <section class="card welcome" id="welcome" hidden>
+      <h2>Let’s set up your message backups</h2>
+      <span class="secondary">Your messages, saved on your own computer, ready to read here or put back on an Android phone. The quickest start is from your phone: years of texts in minutes. Then this extension keeps the backup up to date.</span>
+      <ol class="steps">
+        <li id="step1"><b>Choose a folder for your backups.</b> We suggest making a new folder called “Messages Backup” in your Documents folder. Chrome will ask you to allow the extension to save there: choose <b>Allow</b>, or <b>Allow on every visit</b> if it offers that.
+          <div class="detail"><button class="filled small" id="welcomeChoose">Choose a folder…</button> <span id="welcomeFolder" class="gray"></span></div></li>
+        <li id="stepPhone"><b>Start with your phone (fastest).</b> On your Android phone, open the <b>Message Archivist</b> app, tap <b>Back up this phone</b> and save the file. It reads the phone’s own copy of your texts, so years of them take minutes instead of hours. Copy the file to this computer (or open it from Google Drive), then bring it in. <a href="https://github.com/trikhster/message-archivist/blob/main/extension/README.md#back-up-a-phone-with-the-android-app" target="_blank" rel="noopener">How to get the app</a>
+          <div class="detail"><button class="tonal small" id="welcomePhone">Bring in a phone backup…</button> <span class="gray">No Android phone to hand? Skip this; the next steps back everything up from Google Messages for Web instead, which takes longer.</span></div></li>
+        <li id="step2"><b>Open Google Messages and connect your phone.</b> On your phone, open Messages, tap your profile picture → <b>Device pairing</b> → <b>QR code scanner</b>, and scan the code shown in Chrome.
+          <div class="detail"><button class="tonal small" id="welcomeMessages">Open Google Messages</button></div></li>
+        <li id="step3"><b>Back up everything from here once, then keep it up to date.</b> This fills in what the phone doesn’t keep (some chat messages you sent, during a Google Messages bug), contact cards and pictures, and matches the messages already brought in from the phone instead of saving them twice. After that, only new messages are added: by hand, or on a schedule (Backups tab). Google Messages moves into a small window in the corner of your screen while it works, so you can keep using your computer; just don’t minimise or cover it.
+          <div class="detail"><button class="tonal small" id="welcomeAll">Back up everything…</button></div></li>
+      </ol>
+    </section>
+
+    <section class="card" id="home">
+      <h2>Your backups</h2>
+      <div id="homeStatus" class="home-status"><div class="skeleton w60"></div><div class="skeleton w80"></div></div>
+      <div class="row" style="margin-top:12px"><button id="openBackup" class="filled">Open my backup</button><button id="totalRun" class="tonal">Back up everything…</button><button id="homeHealth" class="outlined">See every chat</button></div>
+      <div class="secondary" id="totalMsg" style="margin-top:8px"></div>
+      <div id="totalStatus" style="margin-top:10px"></div>
+      <div class="secondary" style="margin-top:6px">“Back up everything” goes through every conversation in Google Messages, one after another. Years of texts can take hours the first time, and your phone needs to stay on and connected; a phone backup from the Message Archivist app gets you there in minutes (Tools → Bring in a phone backup), and this then only adds what’s new. You can stop it any time; next time it carries on where it left off.</div>
+    </section>
+  </div>
+
+  <!-- ===================== Backups (the index) ===================== -->
+  <div class="tab" id="tab-backups" role="tabpanel" hidden>
+    <section class="card">
+      <h2>Every chat</h2>
+      <span class="secondary">Each chat in your backup or on your automatic backup list, how complete it is, and its photos. Click a chat for the details. Choose how often it’s backed up by itself in its row.</span>
+      <div class="index-tools">
+        <input type="search" id="indexFind" class="pill" placeholder="Find a chat">
+        <button id="runAll" class="tonal small" title="Backs up every chat set to back up by itself, now">Back up automatic chats now</button>
+        <button id="addChats" class="outlined small">Add chats…</button>
+        <button id="indexRefresh" class="icon" title="Read the backup again" aria-label="Read the backup again"><svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z"/></svg></button>
+      </div>
+      <div id="addPanel" class="add-panel" hidden>
+        <div class="row"><input type="search" id="chatFilter" class="pill" placeholder="Find a chat" style="flex:1"><select id="addEvery">
+          <option value="0">Only when I click “Back up automatic chats now”</option><option value="6">Every 6 hours</option><option value="24" selected>Every day</option><option value="168">Every week</option></select></div>
+        <div class="secondary" id="addMsg" style="margin:8px 0"></div>
+        <div class="check" id="pickAll" hidden style="margin:4px 4px 8px"><input type="checkbox" id="pickAllBox"><label for="pickAllBox" id="pickAllLabel">Select all</label></div>
+        <div id="chatPick" class="chat-pick"></div>
+        <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="addCancel">Cancel</button><button id="addSelected" class="filled" disabled>Add selected</button></div>
+      </div>
+      <div class="chips" id="indexFilters" role="group" aria-label="Show"></div>
+      <div class="fixbar" id="indexFix"></div>
+      <div class="secondary" id="indexMsg"></div>
+      <div id="index"></div>
+    </section>
+  </div>
+
+  <!-- ===================== Phone restore ===================== -->
+  <div class="tab" id="tab-restore" role="tabpanel" hidden>
+    <section class="card">
+      <h2>Put your texts back on an Android phone</h2>
+      <span class="secondary">Makes one file with every chat that has a phone number, its messages in order, and its photos and videos. Copy it to the phone and open it with the <b>Message Archivist</b> app (part of this project): it puts the texts back into the phone’s messages, then hands back to Google Messages. Times are to the minute; messages sent in the same minute keep their order. RCS chats go back as ordinary texts and picture messages. iPhones can’t import texts.</span>
+      <div class="ready" id="restoreReady"><div class="skeleton"></div></div>
+      <div id="restoreLeft"></div>
+      <div class="check"><input type="checkbox" id="phoneMedia"><label for="phoneMedia">Include photos and videos <span class="secondary">(recommended; written a little at a time, so the size of years of photos isn’t a problem)</span></label></div>
+      <div class="row" style="margin-top:10px"><button id="exportPackage" class="filled">Make the restore file</button><span class="secondary" id="packageMsg"></span></div>
+      <details style="margin-top:16px"><summary class="secondary">Using SMS Backup &amp; Restore instead?</summary>
+        <div class="secondary" style="margin:8px 0">The same messages as an XML file for the SMS Backup &amp; Restore app (SyncTech). Photos are written inside the file as text, so it’s about a third bigger.</div>
+        <div class="row"><button id="exportPhone" class="outlined small">Make an SMS Backup &amp; Restore file</button><span class="secondary" id="phoneMsg"></span></div>
+      </details>
+    </section>
+  </div>
+
+  <!-- ===================== Tools ===================== -->
+  <div class="tab" id="tab-tools" role="tabpanel" hidden>
+    <section class="card" id="healthCard">
+      <h2>Check your backup</h2>
+      <span class="secondary">Nothing changes unless a result offers a button and you click it.</span>
+      <div class="row" style="margin:4px 0 10px"><button id="verifySums" class="tonal small" title="Recomputes each file’s SHA-256 checksum and compares it with SHA256SUMS.txt">Check no files have changed</button><button id="checkPhotos" class="tonal small" title="Opens every saved photo and video and checks it’s there, unchanged, and the size recorded in the chat’s photo list">Check every photo</button><button id="findDupes" class="outlined small" title="Photos saved twice, such as a GIF and its still picture, or a thumbnail beside the full-size photo">Find duplicate photos</button><span class="secondary" id="healthMsg"></span></div>
+      <div id="health"></div>
+    </section>
+    <section class="card">
+      <h2>Bring in other backups</h2>
+      <span class="secondary">Zips or folders made by earlier versions of this extension (pick one export, or a folder that holds several, such as Downloads → Google Messages Exports), or a phone backup made with the Message Archivist app, whose chats are matched to yours by phone number. Only messages and photos that aren’t already here are added; the files you bring in aren’t changed.</span>
+      <div class="row"><button id="importFolder" class="tonal small">Bring in a folder…</button><button id="importZip" class="outlined small">Bring in a zip file…</button><button id="importPhone" class="outlined small" title="A .tar file from the Message Archivist app → Back up this phone">Bring in a phone backup…</button></div>
+      <div id="importMsg" class="secondary" style="margin-top:8px"></div>
+    </section>
+    <section class="card">
+      <h2>Past runs</h2>
+      <span class="secondary">The last 30 backups, imports and clean-ups. Open one to see its log; if something went wrong, “Copy log” and send it to whoever is helping you.</span>
+      <div id="runs"></div>
+      <div style="margin-top:10px"><button id="clearRuns" class="outlined small">Clear history</button></div>
+    </section>
+  </div>
+
+  <!-- ===================== Settings ===================== -->
+  <div class="tab" id="tab-settings" role="tabpanel" hidden>
+    <section class="card">
+      <div class="seg" role="group" aria-label="Which settings"><button id="modeBasic" aria-pressed="true">Basic</button><button id="modeAdvanced" aria-pressed="false">Advanced</button></div>
+
+      <div class="settings-list" id="basicList">
+        <div class="setting" id="folderCard"><div class="name"><b>Backup folder</b><span class="secondary">Everything is kept here: every chat, its photos and contact details, and a page to read them.</span></div>
+          <div><div class="row"><span id="folderName" class="gray">No folder chosen</span><button id="chooseFolder" class="tonal small">Choose a different folder…</button><button id="allowFolder" class="filled small" hidden>Allow access</button></div>
+          <div class="secondary" id="folderAccess" style="margin-top:6px"></div></div></div>
+        <div class="setting"><div class="name"><b>Photos and videos</b><span class="secondary">Needed to put picture messages back on a phone.</span></div>
+          <div class="check"><input type="checkbox" id="includeMedia"><label for="includeMedia">Save photos, GIFs, videos and voice notes</label></div></div>
+        <div class="setting"><div class="name"><b>Photo quality</b><span class="secondary">Full size opens each photo in Google Messages’ viewer; most of that happens while older messages load, so it adds little time.</span></div>
+          <select id="photoQuality"><option value="full">Full size (recommended)</option><option value="thumb">As shown in the chat (faster, smaller)</option></select></div>
+        <div class="setting"><div class="name"><b>While a backup runs</b><span class="secondary">Google Messages only loads older messages while its page is showing.</span></div>
+          <select id="backupWindow"><option value="corner">Small window in a corner of the screen (recommended)</option><option value="window">A window of its own</option><option value="tab">Leave it where it is</option></select></div>
+        <div class="setting"><div class="name"><b>Notifications</b></div>
+          <div class="check"><input type="checkbox" id="notify"><label for="notify">Tell me when a backup finishes</label></div></div>
+        <div class="setting"><div class="name"><b>Theme</b></div>
+          <select id="theme"><option value="system">Same as my computer</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
+      </div>
+
+      <div class="settings-list" id="advancedList" hidden>
+        <div class="setting"><div class="name"><b>Corner</b><span class="secondary">Where the small backup window goes.</span></div>
+          <select id="compactCorner"><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-right">Top right</option><option value="top-left">Top left</option></select></div>
+        <div class="setting"><div class="name"><b>Patience</b><span class="secondary">How long to wait for older messages before deciding a chat is complete. If backups stop before a chat’s first message, choose Thorough.</span></div>
+          <select id="patience"><option value="10">Quick (10 seconds)</option><option value="25">Normal (25 seconds)</option><option value="60">Thorough (60 seconds)</option></select></div>
+        <div class="setting"><div class="name"><b>Full-size photos while loading</b><span class="secondary">Opens new photos in the viewer while Google Messages fetches the next batch, instead of all at the end.</span></div>
+          <div class="check"><input type="checkbox" id="fullSizeEarly"><label for="fullSizeEarly">On (recommended)</label></div></div>
+        <div class="setting"><div class="name"><b>Double-check</b><span class="secondary">About twice as long; anything missed the first time is added.</span></div>
+          <div class="check"><input type="checkbox" id="verifyRead"><label for="verifyRead">Read each chat twice in “Back up everything”</label></div></div>
+        <div class="setting"><div class="name"><b>Link-preview pictures</b><span class="secondary">Spotify, TikTok, news sites… Chrome asks to let the extension read other websites; it’s only used for those pictures.</span></div>
+          <div class="check"><input type="checkbox" id="previewPics"><label for="previewPics">Save them</label></div></div>
+        <div class="setting"><div class="name"><b>Page markup</b><span class="secondary">The exact HTML Google Messages used for each message. Makes messages.json several times bigger.</span></div>
+          <div class="check"><input type="checkbox" id="rawMarkup"><label for="rawMarkup">Keep it</label></div></div>
+        <div class="setting"><div class="name"><b>Date-range copies</b><span class="secondary">Popup → More options. Downloaded as zip files to Downloads /</span></div>
+          <input type="text" id="subfolder" placeholder="(directly in Downloads)"></div>
+        <div class="setting"><div class="name"><b>Case reference</b><span class="secondary">For legal or evidence use: recorded in export-info.json, logs and printouts. Every run is logged and every file has a SHA-256 checksum (<code>shasum -a 256 -c SHA256SUMS.txt</code>).</span></div>
+          <input type="text" id="caseNote" placeholder="e.g. Case 2026-114, exported by J. Doe"></div>
+      </div>
+    </section>
+  </div>
+</main>
+<dialog id="deleteDlg" class="card">
+  <h2 id="delTitle"></h2>
+  <p id="delText" class="gray"></p>
+  <div class="check"><input type="checkbox" id="delExclude" checked><label for="delExclude">Don’t back it up again <span class="secondary">“Back up everything” skips it, and it’s taken off the automatic backup list. Backing it up yourself from the popup brings it back.</span></label></div>
+  <div class="row" style="justify-content:flex-end;margin-top:16px"><button id="delCancel">Cancel</button><button id="delGo" class="filled danger">Delete from backup</button></div>
+  <div id="delMsg" class="secondary" style="margin-top:8px"></div>
+</dialog>
+<div id="toast"></div>
+<script src="theme.js"></script>
+<script src="zip.js"></script>
+<script src="library.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

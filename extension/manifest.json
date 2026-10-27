@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Message Archivist",
+  "version": "0.0.1.0",
+  "description": "Back up Google Messages for Web to your own computer: messages, photos and contacts, checked for completeness and readable offline.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "unlimitedStorage",
+    "downloads",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://messages.google.com/*",
+    "https://*.googleusercontent.com/*",
+    "https://*.google.com/*",
+    "https://*.googleapis.com/*",
+    "https://*.gstatic.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Export Google Messages",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "viewer.html",
+        "viewer.js",
+        "theme.js",
+        "theme.css",
+        "writer.html",
+        "writer.js"
+      ],
+      "matches": [
+        "https://messages.google.com/*"
+      ]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://messages.google.com/*"
+      ],
+      "js": [
+        "zip.js",
+        "library.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "options_page": "options.html",
+  "homepage_url": "https://github.com/trikhster/message-archivist"
+}

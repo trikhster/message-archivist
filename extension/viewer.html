@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Message Archivist</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%92%AC%3C/text%3E%3C/svg%3E">
+<style>
+/* Layout for the archive viewer. Colours, buttons, fields and chips come from
+   theme.css (Google Messages / Material 3 look, light and dark). */
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+mark { background: var(--mark); color: var(--on-mark); border-radius: 3px; padding: 0 1px; }
+mark.focus { background: var(--mark-focus); color: #1f1f1f; }
+.empty { color: var(--muted); padding: 32px; text-align: center; }
+
+/* top app bar */
+header { display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 12px 0 16px; background: var(--surface); flex: none; }
+.brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.brand .logo { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--primary-container); font-size: 20px; }
+.brand h1 { font-size: 22px; color: var(--text-2); }
+nav { display: flex; gap: 4px; margin-left: 12px; }
+nav a { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 20px; color: var(--text-2); font: 500 14px var(--font-display); }
+nav a:hover { background: var(--hover); text-decoration: none; }
+nav a.active { background: var(--selected); color: var(--on-selected); }
+header .meta { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.livebar { margin: 0 12px 8px; padding: 10px 16px; border-radius: 12px; background: var(--primary-container); color: var(--on-primary-container); flex: none; }
+
+.view { flex: 1; min-height: 0; display: none; }
+.view.active { display: flex; animation: gm-fade var(--dur-2) var(--ease) both; }
+.conv { transition: background-color var(--dur-1) var(--ease); }
+.result { animation: gm-rise var(--dur-3) var(--ease-out) both; }
+.tile { transition: transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
+.tile:hover { transform: scale(1.02); box-shadow: var(--shadow-1); z-index: 1; }
+.tile img { animation: gm-fade var(--dur-3) var(--ease) both; }
+#lightbox.open { animation: gm-fade var(--dur-2) var(--ease) both; }
+#lightbox.open .lb-stage > * { animation: gm-pop var(--dur-3) var(--ease-out) both; }
+.lab-menu { animation: gm-pop var(--dur-2) var(--ease-out) both; transform-origin: top left; }
+#help:not([hidden]) { animation: gm-fade var(--dur-2) var(--ease) both; }
+#help:not([hidden]) .help-card { animation: gm-pop var(--dur-3) var(--ease-out) both; }
+nav a { transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 8px 16px 12px; flex: none; }
+.toolbar label.inline { display: inline-flex; gap: 6px; align-items: center; color: var(--text-2); }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+
+/* chats: list on the left, conversation in a rounded panel on the right */
+#view-chats { flex-direction: row; gap: 8px; padding: 0 12px 12px 0; }
+.sidebar { width: 360px; flex: none; display: flex; flex-direction: column; min-height: 0; }
+.side-tools { display: flex; gap: 8px; padding: 4px 12px 12px; }
+.side-tools input { flex: 1; }
+.side-tools select { width: 128px; }
+#convList { overflow-y: auto; flex: 1; padding: 0 8px; }
+.conv { display: flex; gap: 14px; align-items: center; width: 100%; height: auto; padding: 10px 12px; border-radius: 28px; text-align: left;
+  color: var(--text); font: 14px/20px var(--font); justify-content: flex-start; white-space: normal; }
+.conv.active { background: var(--selected); color: var(--on-selected); }
+.conv-body { flex: 1; min-width: 0; }
+.conv-top { display: flex; gap: 8px; align-items: baseline; }
+.conv-title { font: 500 15px/22px var(--font-display); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-date { color: var(--muted); font-size: 12px; flex: none; }
+.conv.active .conv-date, .conv.active .conv-snip, .conv.active .conv-count { color: inherit; opacity: .8; }
+.conv-snip { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-count { color: var(--muted); font-size: 12px; }
+.chat { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); border-radius: 24px; overflow: hidden; }
+.chat-head { padding: 12px 16px 8px 20px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--divider); }
+.chat-head-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.chat-title { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.chat-title h2 { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-tools { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.chat-tools input[type="search"] { width: 220px; height: 40px; }
+.chat-tools input[type="month"] { width: 150px; }
+#chatHits { color: var(--muted); min-width: 56px; text-align: center; font-size: 12px; }
+#people { max-height: 76px; overflow-y: auto; padding-bottom: 4px; }
+
+.scroll-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
+.scroll { flex: 1; overflow-y: auto; position: relative; padding: 0 56px 24px 16px; scrollbar-width: none; }
+.scroll::-webkit-scrollbar { display: none; }
+.month { content-visibility: auto; contain-intrinsic-size: auto 900px; }
+/* Chat months are drawn and emptied by the viewer itself (see renderChat). */
+#chatScroll .month { content-visibility: visible; contain-intrinsic-size: none; }
+#chatScroll .month.in .msgs { animation: gm-fade var(--dur-2) var(--ease) both; }
+.month-head { position: sticky; top: 0; z-index: 2; margin: 0 -56px 0 -16px; padding: 10px 20px; font: 500 14px var(--font-display); color: var(--text-2);
+  background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); }
+.month-head .n { font-weight: 400; color: var(--muted); margin-left: 8px; font-size: 12px; }
+.day { text-align: center; color: var(--muted); font: 500 12px var(--font-display); margin: 18px 0 8px; }
+.msgs { max-width: 860px; margin: 0 auto; }
+.msg { display: flex; flex-direction: column; align-items: flex-start; margin: 2px 0; padding-left: 36px; position: relative; }
+.msg.sent { align-items: flex-end; padding-left: 0; }
+.msg > .avatar { position: absolute; left: 0; top: 22px; }
+.who { font-size: 12px; color: var(--muted); margin: 10px 14px 2px; }
+.bubble { max-width: min(560px, 76%); padding: 9px 14px; border-radius: 20px; background: var(--recv); color: var(--on-recv); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 21px; }
+.sent .bubble { background: var(--sent); color: var(--on-sent); }
+.sent .bubble a { color: inherit; text-decoration: underline; }
+.bubble.media-only { background: none; padding: 0; }
+.bubble img, .bubble video { display: block; max-width: 100%; max-height: 360px; border-radius: 16px; margin: 2px 0; cursor: zoom-in; background: var(--surface-2); }
+.bubble audio { display: block; max-width: 100%; margin: 4px 0; }
+.quote { border-left: 3px solid currentColor; opacity: .75; padding-left: 8px; margin: 2px 0 6px; font-size: 13px; }
+.missing { opacity: .7; font-size: 13px; font-style: italic; }
+.time { font-size: 11px; color: var(--muted); margin: 2px 14px 6px; cursor: help; }
+/* Not the last of a same-minute run: no time, and its buttons (on hover) sit in the gap. */
+.time.more { height: 0; margin: 0 14px 3px; position: relative; z-index: 1; }
+.rx { display: inline-flex; align-items: center; gap: 2px; margin: -7px 12px 0; padding: 1px 7px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--outline-variant); font-size: 13px; line-height: 18px; position: relative; z-index: 1; cursor: default; }
+.rx .n { font-size: 11px; color: var(--muted); margin: 0 3px 0 1px; }
+.msg.flash .bubble { animation: flash 1.8s ease-out; }
+@keyframes flash { 0%, 40% { box-shadow: 0 0 0 3px var(--mark-focus); } }
+
+/* Google Photos-style scrubber */
+.rail { position: absolute; top: 0; right: 0; bottom: 0; width: 48px; touch-action: none; cursor: ns-resize; user-select: none; z-index: 3; }
+.rail[hidden] { display: none; }
+.rail-marks { position: absolute; inset: 12px 0 12px 0; }
+.rail-year { position: absolute; right: 8px; transform: translateY(-50%); font: 500 11px var(--font-display); color: var(--muted); }
+.rail-dot { position: absolute; right: 19px; width: 4px; height: 4px; border-radius: 50%; background: var(--outline-variant); transform: translateY(-50%); }
+.rail-thumb { position: absolute; right: 4px; width: 40px; height: 4px; border-radius: 2px; background: var(--primary); margin-top: 12px; }
+.rail-pill, .rail-hover { position: absolute; right: 52px; transform: translateY(-50%); white-space: nowrap; background: var(--primary); color: var(--on-primary); font: 500 13px var(--font-display);
+  padding: 6px 14px; border-radius: 16px; box-shadow: var(--shadow-2); opacity: 0; transition: opacity .2s; pointer-events: none; margin-top: 12px; }
+.rail-hover { background: var(--tooltip); color: var(--on-tooltip); }
+.rail-pill.show, .rail-hover.show { opacity: 1; }
+.rail:hover .rail-dot { background: var(--outline); }
+
+/* search, media, analysis, about share a rounded content panel */
+#view-search, #view-media, #view-review, #view-stats, #view-about { flex-direction: column; padding: 0 12px 12px; }
+.panel-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); border-radius: 24px; overflow: hidden; }
+#q { flex: 1 1 320px; }
+.results { overflow-y: auto; flex: 1; padding: 16px 20px 32px; }
+.inner { max-width: 960px; margin: 0 auto; }
+.summary { margin: 0 0 12px; color: var(--text-2); font: 500 14px var(--font-display); }
+.result { display: flex; gap: 12px; align-items: flex-start; width: 100%; height: auto; text-align: left; padding: 12px 14px; margin: 0 0 4px; border-radius: 16px;
+  color: var(--text); font: 14px/20px var(--font); justify-content: flex-start; white-space: normal; }
+.result:hover { background: var(--surface-1); }
+.result .r-body { flex: 1; min-width: 0; }
+.r-head { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.r-head b { color: var(--text); font: 500 14px var(--font-display); }
+.r-text { margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
+.tag { font-size: 11px; padding: 0 8px; border-radius: 8px; background: var(--surface-2); color: var(--text-2); line-height: 20px; }
+.help { color: var(--text-2); max-width: 640px; margin: 24px auto; line-height: 22px; }
+.trend { margin-bottom: 16px; }
+button.more { width: 100%; margin-top: 8px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px; padding: 6px 0 12px; }
+.tile { position: relative; aspect-ratio: 1; padding: 0; height: auto; border-radius: 12px; background: var(--surface-2); overflow: hidden; display: block; }
+.tile img, .tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tile .badge { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff; font: 500 11px var(--font-display); padding: 2px 8px; border-radius: 8px; }
+.tile.audio { display: grid; place-items: center; font-size: 28px; color: var(--muted); }
+
+#lightbox { position: fixed; inset: 0; background: var(--scrim); z-index: 50; display: none; flex-direction: column; color: #fff; }
+#lightbox.open { display: flex; }
+.lb-stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 16px 72px; }
+.lb-stage img, .lb-stage video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }
+.lb-cap { padding: 12px 24px 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.lb-cap .t { flex: 1; min-width: 200px; }
+.lb-cap .t div { color: #ccc; white-space: pre-wrap; max-height: 4.5em; overflow: auto; }
+.lb-cap .sha { font: 11px 'Roboto Mono', Menlo, monospace; color: #aaa; overflow-wrap: anywhere; }
+#lightbox button { color: #fff; }
+#lightbox button:hover { background: rgba(255,255,255,.12); }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; font-size: 26px; padding: 0; background: rgba(255,255,255,.08); }
+.lb-prev { left: 12px; } .lb-next { right: 12px; }
+.lb-close { position: absolute; top: 12px; right: 12px; z-index: 2; }
+
+.stats { overflow-y: auto; flex: 1; padding: 16px 20px 40px; }
+.stats .inner { display: flex; flex-direction: column; gap: 16px; max-width: 1080px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.stat-card { background: var(--surface-1); border-radius: 16px; padding: 14px 16px; }
+.stat-card .k { color: var(--text-2); font: 500 12px var(--font-display); }
+.stat-card .v { font: 400 26px/34px var(--font-display); color: var(--text); font-variant-numeric: tabular-nums; }
+.stat-card .s { color: var(--muted); font-size: 12px; line-height: 16px; }
+.panel { background: var(--bg); border: 1px solid var(--divider); border-radius: 16px; padding: 16px 20px 18px; min-width: 0; }
+.panel h3 { margin-bottom: 2px; display: flex; gap: 10px; align-items: center; }
+.panel h3 .right { margin-left: auto; }
+.panel .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.legend i { width: 10px; height: 10px; display: inline-block; border-radius: 3px; }
+svg text { fill: var(--muted); font: 10px var(--font); }
+.gridline { stroke: var(--divider); stroke-width: 1; }
+.hit { fill: transparent; cursor: pointer; }
+.hit:hover { fill: var(--hover); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.heat { display: grid; grid-template-columns: 34px repeat(24, 1fr); gap: 3px; font-size: 10px; color: var(--muted); }
+.heat .cell { height: 18px; border-radius: 4px; cursor: pointer; }
+.heat .cell:hover, .cal rect.day:hover { outline: 2px solid var(--text); outline-offset: -1px; }
+.heat .lab { display: flex; align-items: center; }
+.heat .hl { text-align: center; }
+.scale { display: flex; gap: 3px; align-items: center; font-size: 11px; color: var(--muted); margin-top: 10px; }
+.scale i { width: 14px; height: 10px; display: inline-block; border-radius: 3px; }
+.cal { overflow-x: auto; }
+.cal rect.day { cursor: pointer; }
+.yearstats { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 12px; }
+.yearstats div b { display: block; font: 400 18px var(--font-display); color: var(--text); }
+.hbar { display: grid; grid-template-columns: minmax(80px, 180px) 1fr auto; gap: 10px; align-items: center; margin: 4px 0; }
+.hbar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.hbar .track { height: 10px; }
+.hbar .fill { height: 100%; background: var(--c1); border-radius: 0 4px 4px 0; min-width: 2px; }
+.hbar .num { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.hbar.link, .link-row { cursor: pointer; }
+.hbar.link:hover .name { color: var(--primary); }
+.link-row:hover td { background: var(--surface-1); }
+.words { display: flex; flex-wrap: wrap; gap: 8px; }
+.people-table { width: 100%; font-size: 13px; }
+.people-table td:first-child { display: flex; align-items: center; gap: 10px; }
+details summary { cursor: pointer; color: var(--primary); font: 500 13px var(--font-display); margin-top: 10px; }
+.data-table { font-size: 12px; margin-top: 6px; }
+.data-table td, .data-table th { padding: 4px 12px 4px 0; }
+.about dl { display: grid; grid-template-columns: 190px 1fr; gap: 8px 16px; margin: 0; }
+.about dt { color: var(--muted); }
+.about dd { margin: 0; overflow-wrap: anywhere; }
+
+
+/* flags */
+.time { display: flex; align-items: center; gap: 4px; }
+.flag { min-width: 0; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 14px; line-height: 1; color: var(--muted); opacity: 0; display: inline-grid; place-items: center; cursor: pointer; background: none; }
+.msg:hover .flag, .result:hover .flag, .flag.on { opacity: 1; }
+.flag.on { color: #e8a400; }
+.msg.flagged .bubble { box-shadow: 0 0 0 2px #e8a400; }
+.folders { padding: 0 12px 8px; }
+.lab-ico { font-size: 12px; }
+.lab-chip { display: inline-block; font-size: 12px; line-height: 20px; padding: 0 8px; margin: 4px 4px 0 0; border-radius: 10px; background: var(--surface-2, var(--surface-1)); color: var(--text-2); }
+.msg-labels { max-width: min(560px, 76%); }
+.lab-menu { position: fixed; z-index: 100; min-width: 240px; max-height: 70vh; overflow: auto; padding: 8px 0; border-radius: 16px; background: var(--bg); color: var(--text); box-shadow: var(--shadow-2); }
+.lab-menu .lab-title { padding: 6px 16px 8px; font-weight: 500; }
+.lab-menu .lab-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 16px; cursor: pointer; }
+.lab-menu .lab-row:hover { background: var(--surface-1); }
+.lab-menu .lab-row button { min-width: 0; height: 28px; padding: 0 8px; }
+.lab-menu .lab-foot { display: flex; gap: 8px; padding: 8px 12px 4px; border-top: 1px solid var(--divider); margin-top: 6px; }
+.lab-menu .lab-note { padding: 8px 16px 4px; color: var(--muted); font-size: 12px; max-width: 260px; }
+.flag.lab-btn { font-size: 12px; }
+.flag-note { font-size: 12px; color: var(--text-2); background: var(--surface-1); border-radius: 10px; padding: 4px 10px; margin: 4px 0 0; max-width: min(560px, 76%); }
+.result .flag { align-self: center; }
+.r-flag { color: #b07800; font-weight: 500; }
+.ctx { display: block; }
+.ctx-line { display: block; color: var(--muted); font-size: 12px; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-line b { font-weight: 500; color: var(--text-2); }
+#flagCount:empty { display: none; }
+
+/* review */
+.rv-group { margin: 0 0 24px; }
+.rv-head { font: 500 16px var(--font-display); margin: 8px 0 6px; display: flex; gap: 10px; align-items: baseline; }
+.rv-head .n { font: 400 12px var(--font); color: var(--muted); }
+.rv-item, .rv-chat { cursor: pointer; }
+.rv-note { display: block; margin-top: 4px; color: #b07800; font-weight: 500; white-space: pre-wrap; }
+.rv-labels { display: block; }
+.rv-chatlabs { font-size: 12px; color: var(--muted); margin-left: 4px; }
+.rv-actions { display: flex; gap: 4px; flex: none; align-self: center; }
+.rv-actions button { white-space: nowrap; }
+.rv-empty { padding: 4px 14px 8px; }
+@media (max-width: 640px) { .rv-item, .rv-chat { flex-wrap: wrap; } .rv-actions { width: 100%; justify-content: flex-end; } }
+
+/* photos not saved, in the Media tab */
+.tile.missing { display: grid; place-content: center; justify-items: center; gap: 4px; padding: 8px; border: 1px dashed var(--outline); background: var(--surface-1); color: var(--text-2); text-align: center; }
+.tile.missing .miss-ico { font-size: 24px; line-height: 1; }
+.tile.missing .miss-txt { font: 500 12px/16px var(--font-display); white-space: normal; overflow-wrap: anywhere; padding: 0 4px 18px; }
+.tile .st-badge { position: absolute; right: 8px; top: 8px; background: rgba(0,0,0,.6); color: #fff; font: 500 11px var(--font-display); padding: 2px 8px; border-radius: 8px; }
+.media-hint { margin: 8px 0 4px; padding: 10px 14px; border-radius: 12px; background: var(--surface-1); color: var(--text-2); font-size: 13px; line-height: 19px; }
+#flagCount, #helpBtn, #themeBtn { flex: none; }
+
+/* shortcuts */
+#help { position: fixed; inset: 0; z-index: 70; background: var(--scrim); display: grid; place-items: center; }
+#help[hidden] { display: none; }
+.help-card { background: var(--bg); border-radius: 24px; padding: 22px 26px; width: min(520px, calc(100vw - 32px)); box-shadow: var(--shadow-2); }
+.help-card h2 { margin-bottom: 10px; }
+.help-card table { width: 100%; margin-bottom: 12px; }
+kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--outline-variant); background: var(--surface-1); font: 12px 'Roboto Mono', Menlo, monospace; text-align: center; }
+
+/* print / PDF report */
+#printArea { display: none; }
+@media print {
+  html, body { height: auto; overflow: visible; background: #fff; color: #000; display: block; }
+  body > *:not(#printArea) { display: none !important; }
+  #printArea { display: block; font: 11pt/1.4 var(--font); color: #000; }
+  #printArea h1 { font-size: 18pt; color: #000; margin: 0 0 4pt; }
+  .pmeta { font-size: 9pt; color: #444; margin-bottom: 12pt; }
+  .ptable { width: 100%; border-collapse: collapse; }
+  .ptable th { font-size: 9pt; color: #444; border-bottom: 1pt solid #888; text-align: left; padding: 3pt 6pt 3pt 0; }
+  .ptable td { border-bottom: .5pt solid #ccc; padding: 4pt 6pt 4pt 0; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ptable tr { break-inside: avoid; }
+  .pt { width: 22%; font-size: 9pt; color: #333; white-space: nowrap !important; }
+  .ps { width: 16%; font-weight: 500; }
+  .pc { font-weight: 400; font-size: 8pt; color: #666; }
+  .pq { font-size: 9pt; color: #555; border-left: 2pt solid #bbb; padding-left: 4pt; margin-bottom: 2pt; }
+  .pmedia img { max-width: 2.2in; max-height: 2.2in; margin: 3pt 4pt 0 0; border: .5pt solid #ccc; }
+  .pm { font-size: 9pt; color: #555; }
+  .pn { font-size: 9pt; color: #8a5a00; margin-top: 2pt; }
+  tr.pf td { background: #fff7e0; }
+}
+
+@media (max-width: 900px) {
+  #view-chats { flex-direction: column; padding: 0 8px 8px; }
+  .sidebar { width: auto; max-height: 34vh; }
+  .chat-tools { margin-left: 0; }
+  .two { grid-template-columns: 1fr; }
+  header .meta { display: none; }
+  nav { margin-left: 0; }
+  nav a { padding: 0 10px; }
+  .brand h1 { display: none; }
+  .lb-stage { padding: 12px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">💬</span><h1>Message Archivist</h1></div>
+  <nav>
+    <a href="#chat" data-view="chats">Chats</a>
+    <a href="#search" data-view="search">Search</a>
+    <a href="#media" data-view="media">Media</a>
+    <a href="#review" data-view="review">Review</a>
+    <a href="#stats" data-view="stats">Analysis</a>
+    <a href="#about" data-view="about">About</a>
+  </nav>
+  <div class="meta secondary" id="meta"></div>
+  <button class="small tonal" id="flagCount" title="Show flagged messages"></button>
+  <button class="icon" id="helpBtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg viewBox="0 0 24 24"><path d="M11 18h2v-2h-2v2zm1-16a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16zm0-14a4 4 0 00-4 4h2a2 2 0 114 0c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5a4 4 0 00-4-4z"/></svg></button>
+  <button class="icon" id="themeBtn"></button>
+</header>
+<div class="livebar" id="livebar" hidden></div>
+
+<section class="view" id="view-chats">
+  <aside class="sidebar">
+    <div class="side-tools">
+      <input id="convFilter" class="pill" type="search" placeholder="Search conversations">
+      <select id="convSort" title="Sort conversations">
+        <option value="recent">Recent</option>
+        <option value="count">Most messages</option>
+        <option value="name">Favorites, then A–Z</option>
+      </select>
+    </div>
+    <div id="folders" class="chips folders" hidden></div>
+    <div id="convList"></div>
+  </aside>
+  <main class="chat">
+    <div class="chat-head">
+      <div class="chat-head-row">
+        <div class="chat-title"><span id="chatAvatar"></span><div style="min-width:0"><h2 id="chatTitle"></h2><div id="chatMeta" class="secondary"></div><div id="chatLabelsShown"></div></div></div>
+        <div class="chat-tools">
+          <input id="chatSearch" class="pill" type="search" placeholder="Find in chat  ( / )">
+          <button class="icon" id="prevHit" title="Older match (Shift+Enter)"><svg viewBox="0 0 24 24"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg></button>
+          <span id="chatHits"></span>
+          <button class="icon" id="nextHit" title="Newer match (Enter)"><svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg></button>
+          <label class="inline gray" style="display:inline-flex;align-items:center;margin:0 6px"><input type="checkbox" id="mediaOnly" style="margin-right:6px">Media only</label>
+          <input id="jumpMonth" type="month" title="Jump to month">
+          <button class="tonal" id="chatLabels" title="Labels and folders for this chat: Favorites, Family, Spam…">🏷 Labels</button>
+          <button class="tonal" id="chatStats" title="Analysis for this conversation">Analyze</button>
+          <button class="icon" id="chatDelete" title="Delete this chat from your backup" aria-label="Delete this chat from your backup" hidden><svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 002 2h8a2 2 0 002-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
+          <button class="icon" id="chatPrint" title="Print or save as PDF (p)" aria-label="Print or save as PDF"><svg viewBox="0 0 24 24"><path d="M19 8H5a3 3 0 00-3 3v6h4v4h12v-4h4v-6a3 3 0 00-3-3zm-3 11H8v-5h8v5zm3-7a1 1 0 110-2 1 1 0 010 2zm-1-9H6v4h12V3z"/></svg></button>
+        </div>
+      </div>
+      <div class="chips" id="people"></div>
+    </div>
+    <div class="scroll-wrap">
+      <div class="scroll" id="chatScroll"></div>
+      <div class="rail" id="chatRail"></div>
+    </div>
+  </main>
+</section>
+
+<section class="view" id="view-search">
+  <div class="toolbar">
+    <input id="q" class="pill" type="search" placeholder='Search all messages: words, or "an exact phrase"'>
+    <select id="sConv"><option value="">All conversations</option></select>
+    <select id="sSender"><option value="">Anyone</option></select>
+    <select id="sLabel" title="Label on the message or its chat"></select>
+    <select id="sKind">
+      <option value="">Any message</option>
+      <option value="sent">Sent by me</option>
+      <option value="received">Received</option>
+      <option value="media">With media</option>
+      <option value="reply">Replies</option>
+      <option value="link">With a link</option>
+      <option value="flagged">Flagged ★</option>
+    </select>
+    <select id="sWeekday" title="Day of week"><option value="">Any day</option></select>
+    <select id="sHour" title="Hour of day"><option value="">Any hour</option></select>
+    <label class="inline">From <input id="sFrom" type="date"></label>
+    <label class="inline">To <input id="sTo" type="date"></label>
+    <select id="sSort"><option value="new">Newest first</option><option value="old">Oldest first</option></select>
+    <label class="inline"><input type="checkbox" id="sCtx" style="margin-right:6px">Show surrounding messages</label>
+    <button id="sReset">Reset</button>
+    <button id="sPrint">Print / PDF</button>
+    <button class="tonal" id="sCsv">Export CSV</button>
+  </div>
+  <div class="panel-wrap"><div class="results"><div class="inner" id="results"></div></div></div>
+</section>
+
+<section class="view" id="view-media">
+  <div class="toolbar">
+    <select id="mConv"><option value="">All conversations</option></select>
+    <select id="mSender"><option value="">Anyone</option></select>
+    <select id="mKind">
+      <option value="">All media</option>
+      <option value="image">Photos</option>
+      <option value="gif">GIFs</option>
+      <option value="video">Videos</option>
+      <option value="audio">Audio</option>
+    </select>
+    <select id="mStatus" title="Which photos and videos: saved ones, or ones still to fetch or upgrade">
+      <option value="">Saved</option>
+      <option value="full">Full size</option>
+      <option value="thumbnail">Thumbnails (can be upgraded)</option>
+      <option value="original">Saved as sent</option>
+      <option value="waiting">Not fetched yet</option>
+      <option value="failed">Couldn’t be saved</option>
+      <option value="skipped">Not saved (by choice)</option>
+      <option value="left">Left out (another copy kept)</option>
+      <option value="all">Everything listed</option>
+    </select>
+    <span class="gray" id="mCount"></span>
+  </div>
+  <div class="panel-wrap"><div class="scroll-wrap">
+    <div class="scroll" id="mediaScroll"></div>
+    <div class="rail" id="mediaRail"></div>
+  </div></div>
+</section>
+
+<section class="view" id="view-review">
+  <div class="toolbar">
+    <select id="rShow" title="Flagged messages, or one label"></select>
+    <select id="rConv"><option value="">All conversations</option></select>
+    <input id="rFind" class="pill" type="search" placeholder="Find in these messages and notes">
+    <select id="rSort"><option value="old">Oldest first</option><option value="new">Newest first</option></select>
+    <button id="rPrint">Print / PDF</button>
+    <button class="tonal" id="rCsv">Export CSV</button>
+  </div>
+  <div class="panel-wrap"><div class="results"><div class="inner" id="reviewBody"></div></div></div>
+</section>
+
+<section class="view" id="view-stats">
+  <div class="toolbar">
+    <select id="statsScope" title="Conversation"><option value="all">All conversations</option></select>
+    <select id="statsPerson" title="Person"><option value="">Everyone</option></select>
+    <select id="statsPeriod" title="Period">
+      <option value="all">All time</option>
+      <option value="7">Last 7 days</option>
+      <option value="30">Last 30 days</option>
+      <option value="90">Last 3 months</option>
+      <option value="365">Last 12 months</option>
+      <option value="year">This year</option>
+      <option value="lastyear">Last year</option>
+      <option value="custom">Custom dates…</option>
+    </select>
+    <span id="statsCustom" hidden><input id="stFrom" type="date" aria-label="From"> to <input id="stTo" type="date" aria-label="To"></span>
+    <span class="secondary" id="statsPeriodLabel"></span>
+  </div>
+  <div class="panel-wrap"><div class="stats"><div class="inner" id="statsBody"></div></div></div>
+</section>
+
+<section class="view" id="view-about">
+  <div class="panel-wrap"><div class="stats"><div class="inner about" id="aboutBody"></div></div></div>
+</section>
+
+<div id="lightbox" role="dialog" aria-modal="true">
+  <button class="lb-close" id="lbClose">Close</button>
+  <div class="lb-stage" id="lbStage"></div>
+  <button class="lb-nav lb-prev" id="lbPrev" aria-label="Previous">‹</button>
+  <button class="lb-nav lb-next" id="lbNext" aria-label="Next">›</button>
+  <div class="lb-cap"><div class="t" id="lbCap"></div><button id="lbChat">Show in chat</button></div>
+</div>
+<div id="tip"></div>
+<div id="printArea"></div>
+<div id="help" hidden><div class="help-card">
+  <h2>Keyboard shortcuts</h2>
+  <table>
+    <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>Chats, Search, Media, Review, Analysis, About</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Search (in a chat: find in this chat)</td></tr>
+    <tr><td><kbd>n</kbd> / <kbd>N</kbd></td><td>Next / previous match in the chat</td></tr>
+    <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>Next / previous conversation</td></tr>
+    <tr><td><kbd>p</kbd></td><td>Print or save the chat or search results as PDF</td></tr>
+    <tr><td><kbd>t</kbd></td><td>Light / dark theme</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>Esc</kbd></td><td>Photo viewer: previous, next, close</td></tr>
+    <tr><td><kbd>?</kbd></td><td>This list</td></tr>
+  </table>
+  <p class="secondary">Click ☆ beside a message’s time to flag it, with an optional note. Flags are kept in this browser for this archive, and appear in CSV exports and printouts. “Flagged ★” in Search lists them all.</p>
+  <div style="text-align:right"><button class="filled close">Done</button></div>
+</div></div>
+<script src="theme.js"></script>
+<script src="viewer.js"></script>
+</body>
+</html>

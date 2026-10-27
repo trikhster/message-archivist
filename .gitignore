@@ -1,0 +1,45 @@
+# Build output
+dist/
+node_modules/
+
+# macOS / editors
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Never commit real message exports
+*.zip
+GoogleMessages-*/
+* - Messages - */
+Google Messages - */
+
+# Local tool settings
+.claude/settings.local.json
+
+# Obsidian. Only the notes/ vault's shared settings are kept; any other
+# folder opened as a vault (the extension folder, the repo root) stays local.
+.obsidian/
+!notes/.obsidian/
+# ...and in notes/, not the per-device layout, caches or deleted notes.
+notes/.obsidian/workspace*.json
+notes/.obsidian/cache
+.trash/
+
+# Android app (android/): build output and this computer's SDK path
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk
+
+# Restore and phone backup files hold real messages
+*.tar
+
+# Signing keys (the release key lives outside the repo; see notes/Releasing.md)
+*.jks
+*.keystore
+*.p12
+keystore.properties

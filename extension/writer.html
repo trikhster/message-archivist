@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="theme.css">
+<style>
+  /* The frame itself is sized and rounded by the page, to exactly this card. */
+  html, body { height: 100%; background: var(--bg); }
+  .card { height: 100%; background: var(--bg); border: 0; border-radius: 0; padding: 22px 24px; }
+  .card h2 { font-size: 18px; margin-bottom: 6px; }
+  .card p { margin: 0 0 16px; color: var(--text-2); }
+  .row { justify-content: flex-end; }
+</style>
+</head>
+<body>
+  <!-- Shown only when Chrome needs your OK to use the backup folder again. -->
+  <div class="card" id="ask" hidden>
+    <h2>Allow access to your backup folder</h2>
+    <p>Chrome needs your OK to save into “<b id="folder"></b>”. Choose <b>Allow on every visit</b> if Chrome offers it, so automatic backups won’t need to ask again.</p>
+    <div class="row"><button id="cancel">Not now</button><button id="allow" class="filled">Allow access</button></div>
+  </div>
+<script src="theme.js"></script>
+<script src="writer.js"></script>
+</body>
+</html>
