@@ -37,6 +37,8 @@ jobs:
           distribution: temurin
           java-version: 17
       # The key is only on disk for this step; the secrets are set by the owner (notes/Releasing.md).
+      # Without them the release goes out with the extension only, and the owner attaches an
+      # APK signed on their own computer.
       - name: Build the signed APK
         working-directory: android
         env:
@@ -44,8 +46,8 @@ jobs:
           MA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ] || [ -z "$MA_KEYSTORE_PASSWORD" ]; then
-            echo "::error::The signing key secrets ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD aren't set (see notes/Releasing.md)."
-            exit 1
+            echo "::warning::The signing key secrets aren't set, so this release has no APK; attach one signed locally (notes/Releasing.md)."
+            exit 0
           fi
           export MA_KEYSTORE="$RUNNER_TEMP/release.p12"
           trap 'rm -f "$MA_KEYSTORE"' EXIT
@@ -76,9 +78,13 @@ jobs:
             echo ""
             echo "SHA-256 of the zip: \`$(sha256sum dist/*.zip | cut -d' ' -f1)\`"
             echo ""
-            echo "SHA-256 of the APK: \`$(sha256sum dist/*.apk | cut -d' ' -f1)\`"
-            echo ""
-            echo "APK signing certificate SHA-256: \`$(grep -m1 'certificate SHA-256 digest' signer.txt | sed 's/.*: //')\`"
+            if ls dist/*.apk >/dev/null 2>&1; then
+              echo "SHA-256 of the APK: \`$(sha256sum dist/*.apk | cut -d' ' -f1)\`"
+              echo ""
+              echo "APK signing certificate SHA-256: \`$(grep -m1 'certificate SHA-256 digest' signer.txt | sed 's/.*: //')\`"
+            else
+              echo "The APK is signed on the maintainer's computer and attached separately, with its SHA-256 and signing-certificate fingerprint."
+            fi
           } >> release-notes.md
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

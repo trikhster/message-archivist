@@ -36,7 +36,11 @@ The Release workflow gets it from two repository secrets, set by the owner (not 
 base64 -i ~/.android/message-archivist-release.p12 | gh secret set ANDROID_KEYSTORE_BASE64 -R trikhster/message-archivist
 security find-generic-password -s message-archivist-release-key -w | gh secret set ANDROID_KEYSTORE_PASSWORD -R trikhster/message-archivist
 ```
-The workflow writes the key to the runner's temp folder only for the build step (`MA_KEYSTORE`, `MA_KEYSTORE_PASSWORD`, read by `build.gradle.kts`), deletes it after, and fails if the secrets are missing, so a release never goes out without its APK. To build a signed APK locally: `MA_KEYSTORE=~/.android/message-archivist-release.p12 MA_KEYSTORE_PASSWORD="$(security find-generic-password -s message-archivist-release-key -w)" ./gradlew assembleRelease` in `android/`. Without those variables `assembleRelease` makes an unsigned APK.
+The workflow writes the key to the runner's temp folder only for the build step (`MA_KEYSTORE`, `MA_KEYSTORE_PASSWORD`, read by `build.gradle.kts`), deletes it after, and, if the secrets are missing, warns and publishes the release with the extension only. Then sign the APK locally (below), attach it and add its checksums to the notes:
+```bash
+gh release upload vP.M.m.p dist/message-archivist-android-vP.M.m.p.apk -R trikhster/message-archivist
+```
+and add `SHA-256 of the APK` (`shasum -a 256`) and `APK signing certificate SHA-256` (`apksigner verify --print-certs`) to the release notes in place of the line saying it's attached separately. To build a signed APK locally: `MA_KEYSTORE=~/.android/message-archivist-release.p12 MA_KEYSTORE_PASSWORD="$(security find-generic-password -s message-archivist-release-key -w)" ./gradlew assembleRelease` in `android/`. Without those variables `assembleRelease` makes an unsigned APK.
 
 ## History
-0.0.1.0 (2026-10-27): the first public release, and the repository's first commit (see [[Decisions]]); the first with the signed APK. Version numbers from 0.3.5.0 to 0.5.0.1 in these notes are from the project's private development before then.
+0.0.1.0 (2026-10-27): the first public release, and the repository's first commit (see [[Decisions]]); the first with the signed APK, signed on the owner's Mac and attached by hand because the repository secrets weren't set yet. Version numbers from 0.3.5.0 to 0.5.0.1 in these notes are from the project's private development before then.
