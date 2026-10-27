@@ -12,6 +12,7 @@ The user-facing docs live outside this vault: the user guide (`extension/README.
 ## Start here
 - [[Architecture]]: the parts and how they talk
 - [[Backup run]]: what happens, step by step, when a chat is backed up
+- [[Sources]]: one archive for every app (text messages, WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok…)
 - [[Library format]]: every file in the backup folder
 - [[Restore package]]: the file the Android app restores from, and writes when it backs a phone up
 - [[Photo statuses and runs]]: the master list, speed runs, fetch and upgrade
@@ -27,6 +28,7 @@ The user-facing docs live outside this vault: the user guide (`extension/README.
 | Folder access frame | `writer.html`, `writer.js` | [[Writer frame]] |
 | Toolbar popup | `popup.html`, `popup.js` | [[Popup]] |
 | Settings page | `options.html`, `options.js` | [[Settings page]] |
+| Other apps' exports | `importers/` | [[Importers]] |
 | Offline viewer | `viewer.html`, `viewer.js` | [[Viewer]] |
 | Zip writer, theme, scripts | `zip.js`, `theme.*`, `scripts/` | [[Small files]] |
 | Android app | `android/` | [[Android app]] |

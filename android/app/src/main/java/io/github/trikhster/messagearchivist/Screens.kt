@@ -16,6 +16,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -41,6 +44,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -329,8 +333,43 @@ private fun ago(at: Long): String =
     if (System.currentTimeMillis() - at < 60_000) stringResource(R.string.just_now)
     else android.text.format.DateUtils.getRelativeTimeSpanString(at, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS).toString().lowercase()
 
+// "every hour", "every 6 hours", "every day", "every 3 days", "every week".
 @Composable
-private fun everyText(hours: Int) = stringResource(when (hours) { 12 -> R.string.home_every_12; 168 -> R.string.home_every_168; else -> R.string.home_every_24 })
+private fun everyText(hours: Int): String = when {
+    hours <= 1 -> stringResource(R.string.every_hour)
+    hours == 24 -> stringResource(R.string.every_day)
+    hours == 168 -> stringResource(R.string.every_week)
+    hours % 24 == 0 -> stringResource(R.string.every_n_days, hours / 24)
+    else -> stringResource(R.string.every_n_hours, hours)
+}
+
+/** Every so many hours or days, from 1 hour to 30 days (Daily.HOURS). */
+@Composable
+private fun CustomEveryDialog(current: Int, onDismiss: () -> Unit, onSet: (Int) -> Unit) {
+    var days by remember { mutableStateOf(current >= 24 && current % 24 == 0) }
+    var text by remember { mutableStateOf((if (days) current / 24 else current).toString()) }
+    val hours = text.toIntOrNull()?.let { if (days) it * 24 else it }
+    val ok = hours != null && hours in Daily.HOURS
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.s_custom_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = text, onValueChange = { v -> text = v.filter(Char::isDigit).take(3) }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), isError = !ok, modifier = Modifier.fillMaxWidth(),
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SegmentedButton(selected = !days, onClick = { days = false }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text(stringResource(R.string.s_custom_hours)) }
+                    SegmentedButton(selected = days, onClick = { days = true }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text(stringResource(R.string.s_custom_days)) }
+                }
+                Text(stringResource(R.string.s_custom_range), style = MaterialTheme.typography.bodySmall, color = if (ok) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = { TextButton(onClick = { hours?.let(onSet) }, enabled = ok) { Text(stringResource(R.string.s_ok)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.s_cancel)) } },
+    )
+}
 
 // The first thing on the first screen: are this phone's texts backed up?
 // Backed up (with when, and where), backing up but not yet run, the last run
@@ -402,7 +441,7 @@ private fun Loading(ui: UiState) {
 
 // ---------- settings ----------
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsScreen(ui: UiState, a: Actions) {
     val d = ui.daily
@@ -436,11 +475,23 @@ private fun SettingsScreen(ui: UiState, a: Actions) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                         Text(stringResource(R.string.s_how_often), style = MaterialTheme.typography.bodyLarge)
                         Spacer(Modifier.height(8.dp))
-                        val options = listOf(12 to R.string.s_every_12, 24 to R.string.s_every_24, 168 to R.string.s_every_168)
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            options.forEachIndexed { i, (h, label) ->
-                                SegmentedButton(selected = d.everyHours == h, onClick = { a.dailyChange(d.copy(everyHours = h)) }, shape = SegmentedButtonDefaults.itemShape(i, options.size)) { Text(stringResource(label)) }
+                        // The usual choices, and any number of hours or days.
+                        val options = listOf(1 to R.string.s_every_1, 6 to R.string.s_every_6, 12 to R.string.s_every_12, 24 to R.string.s_every_24, 168 to R.string.s_every_168)
+                        val custom = options.none { it.first == d.everyHours }
+                        var customOpen by remember { mutableStateOf(false) }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            options.forEach { (h, label) ->
+                                FilterChip(selected = d.everyHours == h, onClick = { a.dailyChange(d.copy(everyHours = h)) }, label = { Text(stringResource(label)) })
                             }
+                            FilterChip(selected = custom, onClick = { customOpen = true },
+                                label = { Text(if (custom) everyText(d.everyHours).replaceFirstChar { it.uppercase() } else stringResource(R.string.s_every_custom)) })
+                        }
+                        if (customOpen) CustomEveryDialog(d.everyHours, { customOpen = false }) { customOpen = false; a.dailyChange(d.copy(everyHours = it)) }
+                        Spacer(Modifier.height(4.dp))
+                        Text(stringResource(R.string.s_often_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (!Daily.isLocal(d.uri) && d.everyHours < 12) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(stringResource(R.string.s_often_online), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         }
                     }
                     SettingRow(R.drawable.ic_photo, stringResource(R.string.s_media), stringResource(R.string.s_media_text), d.withMedia) { a.dailyChange(d.copy(withMedia = it)) }
@@ -699,7 +750,7 @@ private fun BackupDone(ui: UiState, a: Actions) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
                     ListItem(
                         headlineContent = { Text(stringResource(R.string.daily_title), style = MaterialTheme.typography.titleSmall) },
-                        supportingContent = { Text(stringResource(R.string.daily_text, name)) },
+                        supportingContent = { Text(stringResource(R.string.daily_text, name, everyText(ui.daily?.everyHours ?: 24))) },
                         leadingContent = { Icon(painterResource(R.drawable.ic_schedule), null, tint = MaterialTheme.colorScheme.primary) },
                         trailingContent = { Switch(checked = ui.dailyHere, onCheckedChange = { a.setDaily(it) }) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),

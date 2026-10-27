@@ -12,6 +12,16 @@ three follow [Semantic Versioning](https://semver.org/):
 
 ## [Unreleased]
 
+### Added
+- **One archive for every app.** Bring in your chats from **WhatsApp, Telegram, Discord, Instagram, Messenger and TikTok** from the export each app makes (Settings → Tools → Bring in conversations from other apps). They sit beside your text messages, each marked with its app, in the same viewer, search and analysis. Bring in a newer export later and only what's new is added.
+- **Which one is you?** When an export doesn't say whose it is, Settings asks once per app and remembers.
+- **Back up as often as you like (Android app).** Automatic backup can run every hour, 6 hours, 12 hours, day or week, or at a custom interval of any number of hours or days (1 hour to 30 days). The switch after a backup is now **Back up automatically**.
+- The viewer shows each chat's app, filters the list by app (**All apps**), and links a chat to the same person's chats in other apps (**Also in WhatsApp · Telegram**).
+
+### Changed
+- Other apps' chats are kept in `conversations/<App>/` in the backup folder, with the new status **Imported**; text chats stay where they are. The library's index is version 5 (older libraries read as they are).
+- Phone restore, "Back up everything", photo fetching and the backup list apply to text chats only.
+
 ## [0.0.1.0] - 2026-10-27
 
 The first public release of Message Archivist: a Chrome extension and an Android app that keep your text messages on your own devices.

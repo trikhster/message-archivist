@@ -4,10 +4,12 @@
 [![Latest release](https://img.shields.io/github/v/release/trikhster/message-archivist?include_prereleases&label=pre-release)](https://github.com/trikhster/message-archivist/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-**Message Archivist** keeps your text messages for good, on your own devices. It comes in two parts that work together:
+**Message Archivist** keeps your conversations for good, on your own devices: one archive of your texts and your chats from other apps. It comes in two parts that work together:
 
 - **For Chrome:** an extension that backs up your [Google Messages for Web](https://messages.google.com/web) conversations to a folder on your own computer: every message, photo, GIF, video and voice note, with who sent it and when. It keeps the backup up to date, checks that it's complete, and lets you read, search and analyse everything offline.
 - **For Android:** an app that backs a phone's texts up to one file in minutes, keeps that file up to date by itself, and puts a backup back on a phone. See [The Android app](#the-android-app).
+
+The same archive takes in your chats from **WhatsApp, Telegram, Discord, Instagram, Messenger and TikTok**, from the export each app makes, so every conversation is in one place, searchable together. See [Other apps](#other-apps).
 
 Both are pre-releases (versions 0.x): they work well, and they're still changing.
 
@@ -19,7 +21,7 @@ Both are pre-releases (versions 0.x): they work well, and they're still changing
 - **Back up one chat or every chat.** Messages are saved straight into one backup folder as they're read, so nothing is lost if Chrome closes, and the next backup carries on where it stopped. After that only new messages are added, by hand or on a schedule.
 - **Know it's complete.** Each chat is checked every time it's saved: that its very first message was reached (and on what evidence), that the newest messages are saved, that there are no duplicates and that every photo is in. "Back up everything" also checks every conversation in Google Messages against the backup.
 - **Everything, byte for byte.** Photos at full size, GIFs, videos and audio exactly as Messages has them, plus contact names, numbers and photos.
-- **Start from your phone.** Message Archivist's Android app backs a phone's texts up in minutes (years of them; Google Messages for Web takes hours), can keep that file up to date every day, on the phone or Google Drive, and the extension brings it in and carries on from there: it recognises the messages already in, and adds what the phone doesn't keep.
+- **Start from your phone.** Message Archivist's Android app backs a phone's texts up in minutes (years of them; Google Messages for Web takes hours), can keep that file up to date by itself (as often as every hour), on the phone or Google Drive, and the extension brings it in and carries on from there: it recognises the messages already in, and adds what the phone doesn't keep.
 - **Back on your phone.** The same app puts a backup back into a phone's messages: every chat with a number, group chats, photos and videos, in order, without duplicates. Years of texts are fine. (SMS Backup & Restore's format is available too.)
 - **Built for years of texts.** Long chats are saved as they're read and don't slow down as they grow; the viewer draws a month at a time, so a chat of 100,000 messages opens in seconds.
 - **Every photo accounted for.** Each chat keeps a master list of its photos and videos with their status (full size, thumbnail, not fetched yet, failed…). Do a quick speed run for the messages, then fetch the photos or upgrade thumbnails to full size later, without reading the whole chat again.
@@ -54,6 +56,25 @@ The full **[user guide](extension/README.md)** covers everything else.
 - Archived chats aren't in Messages' main list. Open each one and back it up from the popup.
 - Works in Chrome and other Chromium browsers that support folder access (Edge, Brave). It relies on Google Messages' page layout; if Google changes it, please [report it](https://github.com/trikhster/message-archivist/issues/new/choose).
 
+## Other apps
+
+The archive isn't only for texts. Bring in your chats from other apps and they sit beside your text messages, each marked with its app, in the same viewer, search and analysis.
+
+| App | What to export | Notes |
+|---|---|---|
+| WhatsApp | open a chat → ⋮ → More → **Export chat** (Android), or tap the name → **Export Chat** (iPhone); choose **Attach media** | one chat per export; the .zip (or .txt) |
+| Telegram | Telegram Desktop → Settings → Advanced → **Export Telegram data**, format **Machine-readable JSON** | every chat at once, with photos |
+| Discord | User Settings → Data & Privacy → **Request all of my data** | Discord's package has **only the messages you sent**; attachments are links |
+| Instagram, Messenger | Accounts Center → Your information and permissions → **Download your information**, Messages, **JSON** | every chat, with photos and videos |
+| TikTok | Settings and privacy → Account → **Download your data**, **JSON** | direct messages; shared videos are links |
+
+Then in the extension's Settings → *Tools* → **Bring in conversations from other apps**, pick the file (or the unzipped folder). It shows what's in it before anything is added. If an export doesn't say which name is yours, it asks once and remembers.
+
+- **Bring in a newer export whenever you like.** Only messages that aren't in the archive yet are added.
+- **Each app's chats stay separate.** Your texts and your WhatsApp chat with the same person are two conversations, each as that app had it. In the viewer, a chat with someone shows "Also in WhatsApp · Telegram" to jump to their chats in other apps, and **All apps** narrows the list to one.
+- **Everything is read on your computer.** No logins to those apps, nothing uploaded. Their chats can't go back on a phone as texts; that's for text messages only.
+- **iMessage and Signal** aren't supported yet: iMessage lives in a database on your Mac, and Signal has no plain export.
+
 ## The Android app
 
 **Message Archivist for Android** backs up the texts on an Android phone and puts them back. It reads the phone's own copy of your messages, so years of texts and photos take minutes instead of the hours Google Messages for Web needs to scroll through them. It saves them in the extension's format: the extension can bring a phone backup into your computer backup, and the app can restore a backup the extension made.
@@ -62,7 +83,7 @@ The full **[user guide](extension/README.md)** covers everything else.
   <img src="docs/screenshots/android/home.jpg" alt="The app's first screen: your texts are backed up, with Back up now and Settings" width="24%">
   <img src="docs/screenshots/android/backup.jpg" alt="Backing up this phone: its messages, chats and photos, and Include photos and videos" width="24%">
   <img src="docs/screenshots/android/backing-up.jpg" alt="A backup in progress, with the time left" width="24%">
-  <img src="docs/screenshots/android/backup-saved.jpg" alt="Backup saved, with Back up every day turned on and Share" width="24%">
+  <img src="docs/screenshots/android/backup-saved.jpg" alt="Backup saved, with automatic backup turned on and Share" width="24%">
 </p>
 
 ### Install the app
@@ -91,7 +112,7 @@ Under it are how many messages, chats and photos and videos are on the phone, **
 3. Tap **Save backup** and choose where to keep it: Downloads, Google Drive, or anywhere else the phone offers. The file is called `messages-backup-<date>.tar`.
 4. It shows its progress (the messages, chats and photos so far, the chat it's on and the time left), also in a notification, so you can leave the app. **Stop** keeps the chats finished so far as a working backup.
 5. **Backup saved** gives the counts and the file's name and size, with:
-   - **Back up every day**: keeps this file up to date by itself (see [Keep it up to date](#keep-it-up-to-date)).
+   - **Back up automatically**: keeps this file up to date by itself (see [Keep it up to date](#keep-it-up-to-date)).
    - **Share**: sends the file to any app, such as Drive, email or Nearby Share.
    - **Next: your computer backup**: how to bring the file into the extension.
 
@@ -107,10 +128,10 @@ Backing up never changes your SMS app. On a test phone, 38,281 messages and 262 
 ### Keep it up to date
 
 - **Update a backup instead…** (on the backup screen) picks a backup you made before and adds only what's new: the messages since, and its photos if it was made without them and **Include photos and videos** is on now. Messages since deleted from the phone stay in the backup. A file on the phone's own storage is added to in place, in seconds; a file on Google Drive is copied to the phone, updated, and saved back whole.
-- **Automatic backup** does the same by itself, in the background. Turn it on with **Back up every day** after a backup, or in Settings with **Back up by itself**, which asks for a **New file…** (backed up straight away) or **A backup I already have…** (brought up to date straight away). The first screen shows how the last one went.
+- **Automatic backup** does the same by itself, in the background. Turn it on with **Back up automatically** after a backup, or in Settings with **Back up by itself**, which asks for a **New file…** (backed up straight away) or **A backup I already have…** (brought up to date straight away). The first screen shows how the last one went.
 
 <p align="center">
-  <img src="docs/screenshots/android/settings.jpg" alt="Settings: automatic backup, the backup file, how often, photos, charging, Wi-Fi and notifications" width="24%">
+  <img src="docs/screenshots/android/settings.jpg" alt="Settings: automatic backup, the backup file, how often (hour, 6 hours, 12 hours, day, week or custom), photos, charging, Wi-Fi and notifications" width="24%">
   <img src="docs/screenshots/android/home-dark.jpg" alt="The first screen in the dark theme" width="24%">
 </p>
 
@@ -120,7 +141,7 @@ Settings (the gear on the first screen):
 |---|---|---|
 | **Back up by itself** | Turns automatic backup on or off. | Off |
 | **Backup file** | The file it keeps up to date, on this phone or online. **Change** picks another. | The file you chose |
-| **How often** | Every 12 hours, every day or every week. Android picks the exact time, when the battery isn't low. | Day |
+| **How often** | Every hour, 6 hours, 12 hours, day or week, or **Custom…**: any number of hours or days, from 1 hour to 30 days. Android picks the exact time, when the battery isn't low, and may wait longer to save battery. A file kept online is uploaded whole each time, so frequent backups with photos use a lot of data. | Day |
 | **Include photos and videos** | Off makes a smaller file; the photos can be added later. | On |
 | **Only while charging** | Waits until the phone is plugged in. | Off |
 | **Only on Wi-Fi** | So a file kept online doesn't use mobile data. | On for a file online, off for one on the phone |
@@ -195,14 +216,15 @@ extension/   the extension itself (load this folder in Chrome)
   writer.html/js            small extension frame that owns the backup folder and writes into it
   background.js             scheduled jobs, date-range downloads, notifications
   popup.html/js             toolbar popup
-  options.html/js           settings page, including import of earlier exports and backup health
+  options.html/js           settings page, including import of earlier exports, other apps' exports and backup health
+  importers/                one file per app (WhatsApp, Telegram, Discord, Instagram/Messenger, TikTok) reading its export into the archive
   viewer.html/js            the archive viewer (copied into the library as index.html + viewer.js)
   zip.js                    small zip writer and reader
   theme.css / theme.js      Google Messages-style look, light/dark theme and toggle
   icons/icon.svg            icon source; PNGs are rendered from it
 android/                    the Android app, which backs a phone up (by itself if asked) and puts backups back (Kotlin, Gradle)
 scripts/                    checks, packaging, setting the version
-test/                       tests for bringing phone backups in, and tools for comparing backups
+test/                       tests for bringing phone backups and other apps' exports in, and tools for comparing backups
 notes/                      developer notes (an Obsidian vault; start at notes/Home.md)
 docs/screenshots/           pictures for this page (made-up chats); android/ has the app's
 .github/workflows/          CI checks and release packaging
@@ -224,7 +246,7 @@ That checks every script's syntax, validates the manifest, confirms every file i
 npm test
 ```
 
-That brings made-up phone backups into a made-up library and checks that chats are matched by number, nothing is added twice, a later backup from Google Messages for Web recognises the phone's messages, and phone chats are shown as "From phone", with numbers formatted and favorites first.
+That brings made-up phone backups and made-up exports from each supported app into a made-up library, and checks that chats are matched by number, nothing is added twice, a later backup from Google Messages for Web recognises the phone's messages, and phone chats are shown as "From phone", with numbers formatted and favorites first.
 
 ```bash
 npm run package

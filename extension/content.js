@@ -2429,10 +2429,13 @@
   // A chat already in the library: by Google's ID; else, for a chat with no ID
   // (from an old export or a phone backup), by name, or by number when it's
   // named by one ("+15550100001" on the phone is "(555) 010-0001" here).
+  // Only text chats: the library also keeps other apps' chats (a WhatsApp chat
+  // with the same name is a different chat).
   const findEntry = (lib, conv) => {
     const num = GMLib.restoreAddrs(null, conv.title)[0];
     const sameNumber = (e) => { const n = GMLib.restoreAddrs(null, e.title)[0]; return !!num && !!n && GMLib.phoneKey(n) === GMLib.phoneKey(num); };
-    return lib.entries.find((e) => e.id && e.id === conv.id) || lib.entries.find((e) => !e.id && e.title === conv.title) || lib.entries.find((e) => !e.id && sameNumber(e)) || null;
+    const texts = lib.entries.filter((e) => GMLib.serviceOf(e.row) === 'sms');
+    return texts.find((e) => e.id && e.id === conv.id) || texts.find((e) => !e.id && e.title === conv.title) || texts.find((e) => !e.id && sameNumber(e)) || null;
   };
 
   // A chat's own index files: chat.js for the viewer and its messages.csv.
@@ -2767,7 +2770,7 @@
   // A chat not yet in data.js may still have a folder from a run that was
   // stopped before the index was written; carry on in that folder.
   async function adoptOrCreate(sink, entries, conv) {
-    const base = `conversations/${safeName(conv.title)}`;
+    const base = GMLib.chatFolder('sms', conv.title);
     for (let n = 1; n < 50; n++) {
       const folder = n === 1 ? base : `${base} (${n})`;
       if (entries.some((e) => e.folder.toLowerCase() === folder.toLowerCase())) continue;

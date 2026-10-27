@@ -6,6 +6,7 @@
   <link rel="icon" href="icons/icon32.png">
   <link rel="stylesheet" href="theme.css">
   <style>
+.app-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 500; color: #fff; background: var(--app); vertical-align: 1px; }
     body { background: var(--surface); }
     main { max-width: 880px; margin: 0 auto; padding: 8px 16px 64px; }
     header { display: flex; align-items: center; gap: 14px; height: 72px; }
@@ -220,6 +221,13 @@
       <div id="health"></div>
     </section>
     <section class="card">
+      <h2>Bring in conversations from other apps</h2>
+      <span class="secondary">One archive for every conversation: bring in chats from WhatsApp, Telegram, Discord, Instagram, Messenger or TikTok, using the export each app makes. They’re kept beside your texts, each marked with its app, and the viewer finds the same person across apps. Bring in a newer export later and only what’s new is added.</span>
+      <div class="row"><button id="importApp" class="tonal small">Bring in an export file…</button><button id="importAppFolder" class="outlined small">Bring in an export folder…</button></div>
+      <details style="margin-top:8px"><summary class="secondary">How to export from each app</summary><ul id="appHow" class="secondary" style="margin:6px 0 0 18px;padding:0"></ul></details>
+      <div id="importAppMsg" class="secondary" style="margin-top:8px"></div>
+    </section>
+    <section class="card">
       <h2>Bring in other backups</h2>
       <span class="secondary">Zips or folders made by earlier versions of this extension (pick one export, or a folder that holds several, such as Downloads → Google Messages Exports), or a phone backup made with the Message Archivist app, whose chats are matched to yours by phone number. Only messages and photos that aren’t already here are added; the files you bring in aren’t changed.</span>
       <div class="row"><button id="importFolder" class="tonal small">Bring in a folder…</button><button id="importZip" class="outlined small">Bring in a zip file…</button><button id="importPhone" class="outlined small" title="A .tar file from the Message Archivist app → Back up this phone">Bring in a phone backup…</button></div>
@@ -282,10 +290,22 @@
   <div class="row" style="justify-content:flex-end;margin-top:16px"><button id="delCancel">Cancel</button><button id="delGo" class="filled danger">Delete from backup</button></div>
   <div id="delMsg" class="secondary" style="margin-top:8px"></div>
 </dialog>
+<dialog id="whoDlg" class="card">
+  <h2>Which one is you?</h2>
+  <p id="whoText" class="gray"></p>
+  <div id="whoList" style="display:grid;gap:6px;max-height:50vh;overflow:auto"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:16px"><button id="whoSkip">None of these</button></div>
+</dialog>
 <div id="toast"></div>
 <script src="theme.js"></script>
 <script src="zip.js"></script>
 <script src="library.js"></script>
+<script src="importers/importers.js"></script>
+<script src="importers/whatsapp.js"></script>
+<script src="importers/telegram.js"></script>
+<script src="importers/discord.js"></script>
+<script src="importers/meta.js"></script>
+<script src="importers/tiktok.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

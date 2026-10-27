@@ -39,6 +39,7 @@ flowchart LR
 - **Library module** ([[Library module]]): pure functions shared by the content script and the Settings page: merging, the per-chat files, the index (`data.js`), completeness checks, photo statuses, checksums. No page or extension APIs.
 - **Background worker** ([[Background worker]]): alarms for scheduled backups, fetching media the page can't read (CORS), downloads into a subfolder, notifications and the badge, moving Messages into its own window, relaying Settings' actions to the Messages tab.
 - **Popup** ([[Popup]]): the per-chat card, start buttons, photo actions.
+- **Importers** ([[Importers]]): read other apps' exports (WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok) into library chats, each marked with its app ([[Sources]]). Loaded by Settings.
 - **Settings** ([[Settings page]]): choosing the folder, backup health, photo checks, deleting chats, importing older exports, restore-to-phone file, schedules.
 - **Viewer** ([[Viewer]]): the offline archive viewer. Opened from the extension with `?library=1` it reads the folder directly (and can save labels and flags); a copy saved in the folder as `index.html` works from disk.
 

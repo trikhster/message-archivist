@@ -47,7 +47,7 @@ for (const page of readdirSync(EXT).filter((f) => f.endsWith('.html'))) {
 }
 
 // Syntax-check every script.
-const scripts = [...readdirSync(EXT).filter((f) => f.endsWith('.js')).map((f) => join(EXT, f)), ...readdirSync('scripts').map((f) => join('scripts', f))];
+const scripts = [...readdirSync(EXT).filter((f) => f.endsWith('.js')).map((f) => join(EXT, f)), ...readdirSync(join(EXT, 'importers')).filter((f) => f.endsWith('.js')).map((f) => join(EXT, 'importers', f)), ...readdirSync('scripts').map((f) => join('scripts', f))];
 for (const f of scripts) {
   try {
     execFileSync(process.execPath, ['--check', f], { stdio: 'pipe' });

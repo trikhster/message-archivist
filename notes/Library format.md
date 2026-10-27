@@ -1,11 +1,11 @@
 ---
 tags: [reference, format]
 updated: 2026-10-26
-index_version: 4
+index_version: 5
 ---
-# Library format (index version 4)
+# Library format (index version 5)
 
-The backup folder the user picks is "the library". One folder per chat, one index for all of them, one viewer. `GMLib.INDEX_VERSION` is `4` and is stored in `data.js`. A change that breaks reading existing libraries is a **major** version (see [[Releasing]]).
+The backup folder the user picks is "the library": every conversation from every app ([[Sources]]). One folder per chat, one index for all of them, one viewer. `GMLib.INDEX_VERSION` is `5` (4 before apps; a version 4 index reads as all text messages) and is stored in `data.js`. A change that breaks reading existing libraries is a **major** version (see [[Releasing]]).
 
 ```
 <backup folder>/
@@ -23,7 +23,9 @@ The backup folder the user picks is "the library". One folder per chat, one inde
   removed-duplicates/<date>/...                extra photo copies moved aside (Settings)
   restore-to-phone/restore-<date>.tar          restore package for the Android app ([[Restore package]]); not in the checksums
   restore-to-phone/sms-<date>.xml              the same for SMS Backup & Restore (Phone restore → "Using SMS Backup & Restore instead?")
-  conversations/<safeName(title)>[ (n)]/
+  conversations/<safeName(title)>[ (n)]/       a text-message chat (service "sms")
+  conversations/<App>/<safeName(title)>[ (n)]/ another app's chat (GMLib.chatFolder): WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok…
+  (each chat folder:)
     messages.json        the chat: convData() with every record(); compact JSON since 0.5.0.0
     progress.json        how far it got, evidence for the first message, checks
     chat.js              window.GM_CHATS[folder] = compactMessages(...)
@@ -39,7 +41,7 @@ Folder names come from `safeName()` (forbidden characters → `_`, max 60 chars)
 
 ## messages.json
 `convData(conv, messages, previous, range)`:
-`conversation`, `conversation_id`, `url`, `exported_at`, `updated_at`, `range?`, `participants`, `message_count`, `media_count`, `media_failed`, `media_skipped`, `messages[]`.
+`service?` (absent = `sms`), `conversation`, `conversation_id` (Google's ID; `<service>:<the app's ID or the chat's name>` for another app), `url`, `exported_at`, `updated_at`, `range?`, `participants`, `message_count`, `media_count`, `media_failed`, `media_skipped`, `group?`, `partial?` (what an import's export leaves out), `messages[]`.
 
 Each message is `record(m, index)` in `content.js`:
 
@@ -62,12 +64,16 @@ Each message is `record(m, index)` in `content.js`:
 | `sender_number`, `phone_id`, `subject` | from a phone backup ([[Restore package]]): the sender's number, the phone's own row (`sms:<id>` / `mms:<id>`), an MMS subject. Such messages have no `id` until a backup from the web claims them (it then sets `id`, and `also_ids` for the second half of a photo and caption the web shows apart; see [[Backup run]]); `timestamp_raw` is the exact time (ISO) and media have `source: 'phone backup'`, `content_type`, `original_name`, `phone_part`, and `kind: 'file'` for anything that isn't a photo, video or audio. A photo from a phone backup made without photos has `file: null` (status *not fetched yet*) |
 | plus `messageDetails()` | `status` (Read, Delivered, Not sent…), `edited`, `reactions`, link and map previews, when present; `raw_html` with the "keep page markup" setting |
 
+Messages from another app's export (`GMLib.importedRecord`) have the same fields, plus `sender_id` (the app's ID for the sender), `sender_name` (what the export called you; your own messages are always `sender: 'Me'`), and `kind` (`system` for notices, `call`); `timestamp_raw` is the exact time (ISO). Media the export didn't include have `file: null`, `skipped: '<why>'` and, when it only linked to them, `url`.
+
 Merging is by `keyOf(m)`: the message ID, or `sigOf(m)` (timestamp, sender, text, media count) when there's no ID. See [[Library module]].
 
 ## progress.json
 Built by `buildProgress()` in `backupConversation`: `complete` (history complete **and** no media waiting, unless photos weren't wanted), `history_complete`, `message_count`, `oldest`, `newest`, `updated_at`, `start` (method, detail and evidence for reaching the first message), `stopped_reason?`, `newest_check { on_screen, all_saved, at }`, `second_read?`, `speed_run?`, `imported_from?`, and `checks` = `GMLib.checkChat(...)`.
 
-`checks.status`: `verified` (every check ok), `complete` (ok with warnings), `phone` ("From phone": `from_phone` set and not yet read to its first message from Messages; every message the phone had), `messages` (speed run, or a phone backup without photos: messages done, photos waiting), `incomplete`, `problem`.
+`checks.status`: `verified` (every check ok), `complete` (ok with warnings), `imported` (another app's export), `phone` ("From phone": `from_phone` set and not yet read to its first message from Messages; every message the phone had), `messages` (speed run, or a phone backup without photos: messages done, photos waiting), `incomplete`, `problem`.
+
+`imported: { service, importer, file, at, partial? }` is set for a chat from another app's export: status `imported` ("Imported", counted as backed up); `partial` makes the start check a warning (Discord's package has only your messages).
 
 `from_phone: { file, at }` is set by a phone import ([[Settings page]]) when the chat's history isn't known to be complete; a backup from Messages keeps it until it reaches the first message. A chat imported from an older export takes `history_complete`, `start` and `newest_check` from that export's own `progress.json` when it has one, instead of starting as unfinished.
 
@@ -76,7 +82,7 @@ Built by `buildProgress()` in `backupConversation`: `complete` (history complete
 `i` index, `d` 1 = sent, `s` sender, `t` timestamp, `x` text, `p` precision (if not `message`), `tr` raw time, `id`, `r` `{ s, x }` reply, `rc` reactions (the labels Google Messages for Web showed), `m[]` media `{ k kind, f path from library root, w, h, src, sha, err, skip, st status }`, `lo[]` left out `{ k, why, w, h }`.
 
 ## data.js
-`GMLib.indexScript({ exported_at, updated_at, info, conversations: rows, skipped, verification, version })`. Each row is `GMLib.summarize(entry)`: `id`, `title`, `folder`, `file` (the `chat.js` path), `participants`, `updated_at`, `range`, `contact` (summary), `count`, `first`, `last`, `media_saved/failed/pending/skipped`, and from 0.4.5.0 `media: { full, same, thumbnail, original, waiting, skipped, failed, left }`, then `status`, `problems`, `checked_at` from the checks. Read back with `GMLib.parseIndex()`; `GMLib.readLibrary()` migrates older libraries.
+`GMLib.indexScript({ exported_at, updated_at, info, conversations: rows, skipped, verification, version })`. Each row is `GMLib.summarize(entry)`: `id`, `title`, `service` (only when not `sms`), `folder`, `file` (the `chat.js` path), `participants`, `updated_at`, `range`, `contact` (summary), `count`, `first`, `last`, `media_saved/failed/pending/skipped`, and from 0.4.5.0 `media: { full, same, thumbnail, original, waiting, skipped, failed, left }`, then `status`, `problems`, `checked_at` from the checks. Read back with `GMLib.parseIndex()`; `GMLib.readLibrary()` migrates older libraries.
 
 ## media-index.json (0.4.5.0)
 `{ conversation, updated_at, statuses: MEDIA_STATUS, counts, items[] }`. Each item: `message_index`, `message_id`, `timestamp`, `sender`, `item` (1-based, `null` for left-out rows), `kind`, `status`, `file` (path from the library root), `width`, `height`, `bytes`, `sha256`, `source`, `note`. Statuses in [[Photo statuses and runs]].

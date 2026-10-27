@@ -144,7 +144,7 @@
       try { c.messages = JSON.parse(t.slice(t.indexOf('] = ') + 4, t.lastIndexOf(';'))); } catch { c.messages = []; c.missingFile = true; }
     }
     try { window.GM_LABELS = JSON.parse((await libText('labels.json')) || 'null'); } catch { /* none yet */ }
-    document.title = `${dir.name} · Messages backup`;
+    document.title = `${dir.name} · Message Archivist`;
     // Photos and videos are read from the folder as they appear on screen.
     const urls = new Map();
     const fill = (el, attrs = ['src', 'href']) => {
@@ -220,6 +220,27 @@
     return raw;
   }).join(', ');
   const isNumberName = (s) => String(s || '').split(/,\s*/).every((t) => NUMBER_RE.test(t.trim()));
+
+  // The app each chat came from (as GMLib.SERVICES): text messages unless the
+  // index says otherwise. One archive holds every app's conversations.
+  const APPS = {
+    sms: ['Text messages', '#1a73e8'], whatsapp: ['WhatsApp', '#25d366'], telegram: ['Telegram', '#2aabee'], discord: ['Discord', '#5865f2'],
+    instagram: ['Instagram', '#d62976'], messenger: ['Messenger', '#0084ff'], tiktok: ['TikTok', '#444444'], imessage: ['iMessage', '#34c759'], signal: ['Signal', '#3a76f0'],
+  };
+  const appOf = (c) => c?.service || 'sms';
+  const appName = (a) => APPS[a]?.[0] || a;
+  const appBadge = (c) => (appOf(c) === 'sms' ? '' : ` <span class="app-badge" style="--app:${APPS[appOf(c)]?.[1] || '#888'}">${esc(appName(appOf(c)))}</span>`);
+  // Who a one-to-one chat is with, as keys that match across apps: the last
+  // ten digits of each number, and the name.
+  const personKeys = (c) => {
+    if (c.group) return [];
+    const others = (c.contact?.people || []).filter((p) => p.n !== 'Me');
+    const keys = others.map((p) => String(p.num || '').replace(/\D/g, '').slice(-10)).filter((d) => d.length >= 7).map((d) => `#${d}`);
+    const name = (others.length === 1 ? others[0].n : c.title) || '';
+    if (name && !isNumberName(name)) keys.push(`@${name.trim().toLowerCase()}`);
+    else if (isNumberName(c.title)) { const d = c.title.replace(/\D/g, '').slice(-10); if (d.length >= 7) keys.push(`#${d}`); }
+    return keys;
+  };
 
   // ---------- reactions sent as texts ----------
   // Where a reaction can't travel as one (to a phone without RCS, or as the
@@ -531,7 +552,9 @@
     function renderConvList() {
       const q = $('#convFilter').value.trim().toLowerCase();
       const sort = $('#convSort').value;
+      const app = $('#convApp').value;
       const list = D.conversations.filter((c) => (!q || c.title.toLowerCase().includes(q) || c.people.some((p) => p.name.toLowerCase().includes(q)))
+        && (!app || appOf(c) === app)
         && (state.folder ? chatLabels(c).includes(state.folder) : !chatLabels(c).includes('spam')));
       renderFolders();
       list.sort(sort === 'count' ? (a, b) => b.messages.length - a.messages.length
@@ -541,7 +564,7 @@
         const last = c.messages.findLast((m) => !m.rxOf); // a reaction isn't the last message
         const snip = last ? `${last.s === 'Me' ? 'You: ' : c.group ? last.s + ': ' : ''}${last.x || (last.m.length ? `[${last.m[0].k}]` : '')}` : '';
         return `<button class="conv${c === state.conv ? ' active' : ''}" data-ci="${c.ci}">${avatar(c.title, convColor(c))}<span class="conv-body">
-          <span class="conv-top"><span class="conv-title">${esc(c.title)}${c.pinned ? ' <span class="lab-ico" title="Pinned in Google Messages">📌</span>' : ''}${chatLabels(c).map((id) => ` <span class="lab-ico" title="${esc(labelById(id).name)}">${esc(labelById(id).icon)}</span>`).join('')}</span><span class="conv-date">${fmtDate(c.last)}</span></span>
+          <span class="conv-top"><span class="conv-title">${esc(c.title)}${appBadge(c)}${c.pinned ? ' <span class="lab-ico" title="Pinned in Google Messages">📌</span>' : ''}${chatLabels(c).map((id) => ` <span class="lab-ico" title="${esc(labelById(id).name)}">${esc(labelById(id).icon)}</span>`).join('')}</span><span class="conv-date">${fmtDate(c.last)}</span></span>
           <span class="conv-snip" style="display:block">${esc(snip.slice(0, 120))}</span>
           <span class="conv-count">${plural(c.messages.length, 'message')}${c.group ? ` · ${c.people.length} people` : ''}${c.status === 'incomplete' || c.status === 'problem' || c.missingFile ? ` · ${statusPill(c)}` : ''}</span></span></button>`;
       }).join('') || `<div class="empty">${!D.conversations.length ? 'No data found. Keep data.js and viewer.js next to this file.' : state.folder ? `No chats labelled ${esc(labelById(state.folder)?.name || '')} yet. Open a chat and use 🏷 Labels.` : D.conversations.some((c) => chatLabels(c).includes('spam')) && !q ? 'Every chat here is labelled Spam: see the 🚫 Spam folder above.' : 'No conversations match.'}</div>`;
@@ -562,6 +585,18 @@
     });
     $('#convFilter').addEventListener('input', debounce(renderConvList, 120));
     $('#convSort').addEventListener('change', renderConvList);
+    // The app filter, once the archive holds more than one app's chats.
+    {
+      const apps = [...new Set(D.conversations.map(appOf))];
+      $('#convApp').hidden = apps.length < 2;
+      $('#convApp').innerHTML = `<option value="">All apps</option>${apps.sort((a, b) => (a === 'sms' ? -1 : b === 'sms' ? 1 : appName(a).localeCompare(appName(b)))).map((a) => `<option value="${esc(a)}">${esc(appName(a))} (${D.conversations.filter((c) => appOf(c) === a).length})</option>`).join('')}`;
+      $('#convApp').addEventListener('change', renderConvList);
+    }
+    // The same person's chats in other apps, by number or name.
+    const byPerson = new Map();
+    for (const c of D.conversations) for (const k of personKeys(c)) { if (!byPerson.has(k)) byPerson.set(k, new Set()); byPerson.get(k).add(c); }
+    $('#chatLabelsShown').addEventListener('click', (e) => { const g = e.target.closest('.also [data-goto]'); if (g) openChat(+g.dataset.goto); });
+    const elsewhere = (c) => [...new Set(personKeys(c).flatMap((k) => [...(byPerson.get(k) || [])]))].filter((o) => o !== c && appOf(o) !== appOf(c));
     $('#convList').addEventListener('click', (e) => {
       const b = e.target.closest('.conv');
       if (b) location.hash = `#chat/${b.dataset.ci}`;
@@ -699,10 +734,11 @@
         chatScroll.innerHTML = '';
         return;
       }
-      $('#chatTitle').textContent = c.title;
+      $('#chatTitle').innerHTML = `${esc(c.title)}${appBadge(c)}`;
       $('#chatAvatar').innerHTML = avatar(c.title, convColor(c));
       const numbers = (c.contact?.people || []).map((p) => p.num).filter((n) => n && n !== c.title);
-      $('#chatLabelsShown').innerHTML = chatLabels(c).map(labelChip).join('');
+      const also = elsewhere(c);
+      $('#chatLabelsShown').innerHTML = chatLabels(c).map(labelChip).join('') + (also.length ? `<div class="also">Also in ${also.map((o) => `<button class="chip" data-goto="${o.ci}" title="${esc(o.title)}">${esc(appName(appOf(o)))}${also.filter((x) => appOf(x) === appOf(o)).length > 1 ? `: ${esc(o.title)}` : ''}</button>`).join(' ')}</div>` : '');
       $('#chatMeta').textContent = `${numbers.length ? `${numbers.slice(0, 3).join(', ')}${numbers.length > 3 ? '…' : ''} · ` : ''}${plural(c.messages.length, 'message')} · ${plural(c.people.length, 'participant')}${c.first ? ` · ${fmtDate(c.first)} – ${fmtDate(c.last)}` : ''}${c.contact?.e2ee ? ' · end-to-end encrypted' : ''}`;
       renderPeople();
 

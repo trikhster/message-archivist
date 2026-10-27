@@ -5,7 +5,7 @@
     <!-- Welcome -->
     <string name="restore_card">Restore a backup</string>
     <string name="backup_card">Back up this phone</string>
-    <string name="backup_card_text">Saves every text and picture message on this phone to one file, on the phone or Google Drive, in minutes. It can keep that file up to date every day, and your computer backup can start from it.</string>
+    <string name="backup_card_text">Saves every text and picture message on this phone to one file, on the phone or Google Drive, in minutes. It can keep that file up to date by itself, as often as every hour, and your computer backup can start from it.</string>
     <string name="step1">Have a backup file</string>
     <string name="step1_text">One made here with Back up this phone, or from the extension: Settings → Phone restore → Make the restore file.</string>
     <string name="step2">Copy it to this phone</string>
@@ -69,8 +69,8 @@
     <string name="backup_updated_sub">%1$s new messages and %2$s photos added to “%3$s”, which now has %4$s messages from %5$s chats (%6$s).</string>
     <string name="update_line">%1$s new messages added to “%2$s”.</string>
     <string name="photos_waiting">Made without photos: %1$s photos and videos can be added later (Update a backup, with photos on).</string>
-    <string name="daily_title">Back up every day</string>
-    <string name="daily_text">Keeps “%1$s” up to date: about once a day, in the background, adding only what’s new.</string>
+    <string name="daily_title">Back up automatically</string>
+    <string name="daily_text">Keeps “%1$s” up to date %2$s, in the background, adding only what’s new. Change how often in Settings.</string>
     <string name="daily_last_error">Last try %1$s: %2$s</string>
     <string name="back_up_now">Back up now</string>
     <string name="just_now">just now</string>
@@ -87,9 +87,11 @@
     <string name="home_not_yet_text">Back this phone up in a few minutes, then keep it up to date by itself.</string>
     <string name="home_counts">%1$s messages · %2$s chats · %3$s photos and videos on this phone</string>
     <string name="settings">Settings</string>
-    <string name="home_every_12">every 12 hours</string>
-    <string name="home_every_24">every day</string>
-    <string name="home_every_168">every week</string>
+    <string name="every_hour">every hour</string>
+    <string name="every_n_hours">every %1$d hours</string>
+    <string name="every_day">every day</string>
+    <string name="every_n_days">every %1$d days</string>
+    <string name="every_week">every week</string>
     <string name="navigate_back">Back</string>
 
     <!-- Settings -->
@@ -104,9 +106,20 @@
     <string name="s_on_phone">On this phone</string>
     <string name="s_online">Online (Google Drive or similar): sent whole each time</string>
     <string name="s_how_often">How often</string>
+    <string name="s_every_1">Hour</string>
+    <string name="s_every_6">6 hours</string>
     <string name="s_every_12">12 hours</string>
     <string name="s_every_24">Day</string>
     <string name="s_every_168">Week</string>
+    <string name="s_every_custom">Custom…</string>
+    <string name="s_custom_title">Back up every…</string>
+    <string name="s_custom_hours">Hours</string>
+    <string name="s_custom_days">Days</string>
+    <string name="s_custom_range">From 1 hour to 30 days.</string>
+    <string name="s_often_note">Android picks the exact time, when the battery isn’t low, and may wait longer to save battery, more so if the app hasn’t been opened for a while.</string>
+    <string name="s_often_online">The file is online, so the whole file is uploaded each time: this often, with photos, can use a lot of data.</string>
+    <string name="s_ok">OK</string>
+    <string name="s_cancel">Cancel</string>
     <string name="s_media">Include photos and videos</string>
     <string name="s_media_text">Off makes a smaller file; photos can be added later.</string>
     <string name="s_charging">Only while charging</string>

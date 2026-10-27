@@ -33,6 +33,9 @@ The offline archive viewer, in three modes:
 - **Photos load near the screen** (library mode): a `gmlib:` `src` is parked in `data-gmlib` and the photo's month section (or the photo) is watched; when it comes within 600 px it's looked up in the folder. The month is watched rather than the picture because gallery months use `content-visibility: auto`, which hides their pictures from IntersectionObserver.
 - Measured on 100,000 messages: 4.7 s to open (4.6: 12.1 s), 25,000 elements (509,000), 121 photos read (2,942); Media tab: 60 of 3,173 photos read.
 
+## Every app (unreleased)
+Each chat shows its app (`APPS`, `appOf`, `appBadge`, copies of `GMLib.SERVICES`); the sidebar's **All apps** select filters the list once there's more than one app; and a one-to-one chat's header says "Also in WhatsApp · Telegram…" with links to the same person's chats in other apps (`personKeys`: the last ten digits of a contact number, else the name). See [[Sources]].
+
 ## Keys to know
 - `ci` is the chat's index in `D.conversations` (not stable between libraries); `i` is the message's `index`.
 - Labels use `chatKey(c) = c.id || c.folder || c.title`; flags use `flagKey(m) = (c.id || ci)|(m.id || m.i)`. See [[Known issues]].

@@ -3,12 +3,70 @@
 // backup library's index, and the checks that say whether a chat's backup is
 // complete. Plain functions only, with no page or extension APIs.
 //
-// The library is one folder. data.js lists every chat with a short summary;
-// each chat keeps its messages in conversations/<chat>/messages.json, plus a
-// chat.js the viewer reads and its own messages.csv. A backup only rewrites
-// the files of the chats it changed.
+// The library is one folder: the archive of every conversation, whichever
+// app it came from (see SERVICES). data.js lists every chat with a short
+// summary; each chat keeps its messages in conversations/[<App>/]<chat>/
+// messages.json, plus a chat.js the viewer reads and its own messages.csv. A
+// backup only rewrites the files of the chats it changed.
 globalThis.GMLib = globalThis.GMLib || (() => {
-  const INDEX_VERSION = 4;
+  const INDEX_VERSION = 5;
+
+  // ---------- the apps a conversation can come from ----------
+  // Every chat in the library belongs to one service. Text messages (SMS, MMS
+  // and RCS: Google Messages for Web, and phone backups from the Android app)
+  // are "sms", the default, so libraries from before services read as they
+  // are. Other apps' chats come in through importers (importers/) and live in
+  // conversations/<folder>/<chat>/. `ids` says what identifies a person there,
+  // which is how the viewer finds the same person in several apps.
+  const SERVICES = {
+    sms: { label: 'Text messages', short: 'SMS', folder: null, color: '#1a73e8', ids: 'phone' },
+    whatsapp: { label: 'WhatsApp', short: 'WA', folder: 'WhatsApp', color: '#25d366', ids: 'phone' },
+    telegram: { label: 'Telegram', short: 'TG', folder: 'Telegram', color: '#2aabee', ids: 'phone or username' },
+    discord: { label: 'Discord', short: 'DC', folder: 'Discord', color: '#5865f2', ids: 'username' },
+    instagram: { label: 'Instagram', short: 'IG', folder: 'Instagram', color: '#d62976', ids: 'username' },
+    messenger: { label: 'Messenger', short: 'FB', folder: 'Messenger', color: '#0084ff', ids: 'name' },
+    tiktok: { label: 'TikTok', short: 'TT', folder: 'TikTok', color: '#444444', ids: 'username' },
+    imessage: { label: 'iMessage', short: 'iM', folder: 'iMessage', color: '#34c759', ids: 'phone or email' },
+    signal: { label: 'Signal', short: 'SG', folder: 'Signal', color: '#3a76f0', ids: 'phone' },
+  };
+  const serviceOf = (x) => (x && (x.service || x.svc)) || 'sms';
+  const serviceLabel = (id) => SERVICES[id]?.label || id;
+  const RESERVED = new Set(Object.values(SERVICES).map((v) => v.folder?.toLowerCase()).filter(Boolean));
+  // Where a new chat's folder goes: text messages straight in conversations/
+  // (as always), every other app in its own folder there. A text chat named
+  // like an app's folder gets " (chat)" so the two never share a folder.
+  function chatFolder(service, title) {
+    const name = safeName(title);
+    const folder = SERVICES[service]?.folder;
+    if (!folder) return `conversations/${RESERVED.has(name.toLowerCase()) ? `${name} (chat)` : name}`;
+    return `conversations/${folder}/${name}`;
+  }
+
+  // One message record from an importer, in the library's shape (the same
+  // fields a backup from Google Messages writes). `at` is a Date or ms; times
+  // become the local "YYYY-MM-DD HH:MM" with the exact time in timestamp_raw.
+  function importedRecord({ id, at, sender, sent, text, media, reply_to, reactions, edited, sender_id, kind }) {
+    const ms = at instanceof Date ? at.getTime() : at;
+    const ok = Number.isFinite(ms);
+    return {
+      ...(id != null && id !== '' ? { id: String(id) } : {}),
+      direction: sent ? 'sent' : 'received',
+      // Your own messages are "Me" in every app, as in text chats; the name
+      // the export used for you is kept beside it.
+      sender: sent ? 'Me' : sender || 'Unknown',
+      ...(sent && sender && sender !== 'Me' ? { sender_name: sender } : {}),
+      ...(sender_id ? { sender_id: String(sender_id) } : {}),
+      text: text || '',
+      timestamp: ok ? localMinute(ms) : null,
+      timestamp_precision: ok ? 'message' : 'unknown',
+      timestamp_raw: ok ? new Date(ms).toISOString() : null,
+      media: media || [],
+      ...(reply_to ? { reply_to } : {}),
+      ...(reactions?.length ? { reactions } : {}),
+      ...(edited ? { edited: true } : {}),
+      ...(kind && kind !== 'message' ? { kind } : {}),
+    };
+  }
 
   // ---------- settings ----------
   // One definition for every part: the content script, the background worker,
@@ -270,6 +328,11 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     } else if (p.from_phone) {
       // From a phone backup (the Android app): every message the phone had.
       add('start', 'ok', 'Whole chat from the phone', `Every message the phone had${p.from_phone.at ? ` on ${p.from_phone.at.slice(0, 10)}` : ''} (${p.from_phone.file || 'a phone backup'}). A backup from Google Messages adds any it didn’t keep, and the contact card.`);
+    } else if (p.imported) {
+      // From another app's export: the chat as that export had it.
+      const what = serviceLabel(p.imported.service);
+      if (p.imported.partial) add('start', 'warn', `Partly from ${what}`, `${p.imported.partial} (${p.imported.file || 'an export'}${p.imported.at ? `, ${p.imported.at.slice(0, 10)}` : ''})`);
+      else add('start', 'ok', `Whole chat from ${what}`, `Every message in ${what}'s export${p.imported.at ? ` of ${p.imported.at.slice(0, 10)}` : ''} (${p.imported.file || 'an export'}). Bring in a newer export to add what's new.`);
     } else if (p.imported_from) {
       add('start', 'bad', 'Not yet read from Messages', `Imported from “${p.imported_from}”. The next backup reads the whole chat again to make sure nothing older is missing.`);
     } else {
@@ -278,12 +341,13 @@ globalThis.GMLib = globalThis.GMLib || (() => {
 
     const nc = p.newest_check;
     if (!nc && p.from_phone && !historyDone) add('newest', 'ok', 'Newest messages saved', `Up to the phone backup${p.from_phone.at ? ` of ${p.from_phone.at.slice(0, 10)}` : ''}`);
+    else if (!nc && p.imported && !historyDone) add('newest', 'ok', 'Newest messages saved', `Up to the export${p.imported.at ? ` of ${p.imported.at.slice(0, 10)}` : ''}`);
     else if (nc) add('newest', nc.all_saved ? 'ok' : 'bad', 'Newest messages saved', nc.all_saved ? `The ${nc.on_screen} newest messages on screen are all in the backup (${(nc.at || '').slice(0, 16).replace('T', ' ')})` : 'Some of the newest messages on screen are missing from the backup');
     else add('newest', 'warn', 'Newest messages not checked', 'The next backup checks this.');
 
     const ids = list.map((m) => m.id).filter(Boolean);
     const dupes = ids.length - new Set(ids).size;
-    add('ids', dupes ? 'bad' : 'ok', dupes ? 'Duplicate messages' : 'No duplicates', dupes ? `${dupes} message IDs appear more than once` : `${list.length.toLocaleString()} messages, ${ids.length.toLocaleString()} with Google message IDs`);
+    add('ids', dupes ? 'bad' : 'ok', dupes ? 'Duplicate messages' : 'No duplicates', dupes ? `${dupes} message IDs appear more than once` : `${list.length.toLocaleString()} messages, ${ids.length.toLocaleString()} with message IDs`);
 
     let back = 0;
     let last = '';
@@ -299,14 +363,16 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     const n = (x) => x.toLocaleString();
     // Every item accounted for: its status, in plain words.
     const breakdown = [c.full + c.same && `${n(c.full + c.same)} full size`, c.thumbnail && `${n(c.thumbnail)} thumbnail${c.thumbnail === 1 ? '' : 's'} (can be upgraded)`, c.original && `${n(c.original)} saved as sent`,
-      c.waiting && `${n(c.waiting)} not fetched yet`, c.failed && `${n(c.failed)} failed`, c.skipped && `${n(c.skipped)} link-preview picture${c.skipped === 1 ? '' : 's'} from other websites not saved`,
+      c.waiting && `${n(c.waiting)} not fetched yet`, c.failed && `${n(c.failed)} failed`, c.skipped && `${n(c.skipped)} not saved (link previews from other websites, or left out of an export)`,
       list.reduce((t, m) => t + m.left, 0) && `${n(list.reduce((t, m) => t + m.left, 0))} left out as copies`].filter(Boolean).join(', ');
     if (pending && p.speed_run) add('media', 'warn', 'Photos not fetched yet (speed run)', `${breakdown}. “Fetch photos” saves them later, going back in the chat only as far as it needs to.`);
     else if (pending) add('media', 'bad', 'Media still to fetch', breakdown);
     else if (failed) add('media', 'warn', 'Some media couldn’t be saved', `${breakdown}. “Retry failed photos” tries them again.`);
     else add('media', 'ok', 'All media accounted for', media.length ? breakdown : 'No media in this chat');
 
-    add('contact', contact?.people?.length ? 'ok' : 'warn', 'Contact card', contact?.people?.length ? contact.people.map((x) => x.name || x.n).join(', ') : 'Not captured');
+    if (contact?.people?.length) add('contact', 'ok', 'Contact card', contact.people.map((x) => x.name || x.n).join(', '));
+    else if (p.imported) add('contact', 'ok', 'People', 'As named in the export');
+    else add('contact', 'warn', 'Contact card', 'Not captured');
 
     const sr = p.second_read;
     if (sr) {
@@ -318,21 +384,27 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     const warn = items.filter((i) => i.level === 'warn');
     // A speed run saves every message first and lists its photos to fetch later.
     // From the phone and not yet read from Messages: "From phone", unless something's wrong.
-    const status = !historyDone ? (p.from_phone ? (bad.some((i) => i.id !== 'media') ? 'problem' : pending ? 'messages' : 'phone') : 'incomplete')
+    // From another app's export: "Imported", unless something's wrong.
+    const status = !historyDone ? (p.from_phone ? (bad.some((i) => i.id !== 'media') ? 'problem' : pending ? 'messages' : 'phone')
+      : p.imported ? (bad.length ? 'problem' : 'imported') : 'incomplete')
       : pending ? (p.speed_run ? 'messages' : 'incomplete') : bad.length ? 'problem' : warn.length ? 'complete' : 'verified';
     return { status, checked_at: new Date().toISOString(), problems: [...bad, ...warn].map((i) => i.label), items };
   }
 
-  const STATUS_LABEL = { verified: 'Verified complete', complete: 'Complete', phone: 'From phone', messages: 'Messages saved, photos to fetch', incomplete: 'Unfinished', problem: 'Needs attention' };
+  const STATUS_LABEL = { verified: 'Verified complete', complete: 'Complete', phone: 'From phone', imported: 'Imported', messages: 'Messages saved, photos to fetch', incomplete: 'Unfinished', problem: 'Needs attention' };
 
   // Which chats are completely backed up, and (after "Back up everything")
   // which conversations in Messages aren't.
   function verificationOf(rows, state, version) {
     const count = (s) => rows.filter((r) => r.status === s).length;
-    const summary = { checked_at: new Date().toISOString(), chats: rows.length, verified: count('verified'), complete: count('complete'), phone: count('phone'), messages: count('messages'), incomplete: count('incomplete'), problem: count('problem') };
+    const summary = { checked_at: new Date().toISOString(), chats: rows.length, verified: count('verified'), complete: count('complete'), phone: count('phone'), imported: count('imported'), messages: count('messages'), incomplete: count('incomplete'), problem: count('problem') };
+    const apps = {};
+    for (const r of rows) apps[serviceOf(r)] = (apps[serviceOf(r)] || 0) + 1;
+    summary.services = apps;
     let coverage = null;
+    // Coverage compares Google Messages' own list with the text chats only.
     if (state?.conversations?.length) {
-      const byId = new Map(rows.filter((r) => r.id).map((r) => [r.id, r]));
+      const byId = new Map(rows.filter((r) => r.id && serviceOf(r) === 'sms').map((r) => [r.id, r]));
       // Chats you deleted from the backup and chose not to back up again don't count.
       const skip = new Set((state.excluded || []).map((e) => e.id));
       const convs = state.conversations.filter((c) => !skip.has(c.id));
@@ -348,7 +420,7 @@ globalThis.GMLib = globalThis.GMLib || (() => {
         tool: 'Message Archivist', version,
         statuses: STATUS_LABEL,
         coverage,
-        chats: rows.map((r) => ({ title: r.title, id: r.id, folder: r.folder, status: r.status, problems: r.problems, messages: r.count, first: r.first, last: r.last,
+        chats: rows.map((r) => ({ title: r.title, service: serviceOf(r), id: r.id, folder: r.folder, status: r.status, problems: r.problems, messages: r.count, first: r.first, last: r.last,
           media_saved: r.media_saved, media_failed: r.media_failed, media_pending: r.media_pending, checked_at: r.checked_at, details: `${r.folder}/progress.json` })),
       },
     };
@@ -364,9 +436,11 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     const media = list.flatMap((m) => m.media);
     const contact = data?.contact || compact?.contact || null;
     const checks = progress?.checks || checkChat(msgs, progress, contact);
+    const service = serviceOf(data || compact);
     return {
       id: id || data?.conversation_id || compact?.id || null,
       title: title || data?.conversation || compact?.title,
+      ...(service !== 'sms' ? { service } : {}),
       folder,
       file: `${folder}/chat.js`,
       participants: data?.participants || compact?.participants || [...new Set(msgs.map((m) => m.sender ?? m.s))],
@@ -700,7 +774,7 @@ globalThis.GMLib = globalThis.GMLib || (() => {
 
   const safeName = (s) => (s || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/[. ]+$/, '').trim().slice(0, 60) || 'Conversation';
 
-  const README = `Google Messages backup
+  const README = `Message Archivist library: your conversations, from every app
 
 index.html                          Open this in your browser: every chat, search,
                                     drill-downs, media and stats, all offline.
@@ -715,9 +789,12 @@ logs/                               The full step-by-step log of each run.
 SHA256SUMS.txt                      SHA-256 checksum of every file. To check nothing
                                     has changed since:  shasum -a 256 -c SHA256SUMS.txt
 labels.json, labels.js              Your labels, flags and notes (not in the checksums).
-conversations/<contact>/
-  messages.json                     The chat, machine readable, including Google's
-                                    message IDs and the exact on-screen labels.
+conversations/<contact>/            A text-message chat (SMS, MMS and RCS).
+conversations/<App>/<contact>/      A chat from another app (WhatsApp, Telegram,
+                                    Discord, Instagram, Messenger, TikTok...),
+                                    brought in from that app's own export.
+  messages.json                     The chat, machine readable, including each
+                                    app's message IDs and the exact times.
   progress.json                     How far the backup has got, the evidence that it
                                     reached the first message, and its checks.
   media-index.json, .csv            Every photo and video in the chat with its status:
@@ -729,8 +806,10 @@ conversations/<contact>/
   media/                            Photos, GIFs, videos and audio, named
                                     "<date> <time> - <sender>.<ext>".
 
-To add new messages later, open messages.google.com and use the extension:
-"Back up this chat", the backup list, or "Back up everything" in its Settings.
+To add new text messages later, open messages.google.com and use the
+extension: "Back up this chat", the backup list, or "Back up everything" in
+its Settings. To add another app's chats, export them from that app and use
+Settings -> Tools -> "Bring in from another app".
 
 Timestamps
   timestamp            Normalised to your local time, "YYYY-MM-DD HH:MM".
@@ -748,6 +827,7 @@ thumbnail. RCS photos are full size; SMS/MMS photos are compressed by the carrie
     SETTINGS_VERSION, SETTINGS_DEFAULTS, normalizeSettings,
     RESTORE_FORMAT, RESTORE_VERSION, tarHeader, tarPadding, tarEnd,
     phoneDigits, restoreAddrs, formatNumber, isNumberName, chatOrder, isFavourite, phoneKey, readPackage, phoneChat, phoneRowFor, useLibraryNames, phoneSlots, claimPhone, phoneClaims, unknownPhone,
+    SERVICES, serviceOf, serviceLabel, chatFolder, importedRecord,
     INDEX_VERSION, sigOf, keyOf, unknownIn, mergeChrono, imageFingerprint, sameImage, betterCopy,
     MEDIA_STATUS, mediaStatus, mediaIndex, mediaCounts, mediaIndexCsv,
     compactMessages, chatScript, contactSummary, chatCsv, joinCsv,

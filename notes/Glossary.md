@@ -30,6 +30,6 @@ updated: 2026-10-26
 | **restore package** | the `.tar` the Android app reads ([[Restore package]]) |
 | **SMS role** | being the phone's default SMS app; only its holder may write messages ([[Android app]]) |
 | **paired** | Google Messages for Web is connected to the phone (the conversation list shows) |
-- **Phone backup**: a [[Restore package]] made by the Android app from a phone's own messages; updated in place, and every day if asked.
+- **Phone backup**: a [[Restore package]] made by the Android app from a phone's own messages; updated in place, and by itself (every hour to every 30 days) if asked.
 - **Claim**: a backup from the web taking a phone-imported message as the same message (it gets Google's ID). See [[Backup run]].
 - **Piece**: one of the files a chat is in, in a version 2 package (`files`).

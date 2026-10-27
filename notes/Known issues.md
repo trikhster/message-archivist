@@ -42,6 +42,9 @@ All four found in the 0.4.5.0 review were fixed before 0.4.5.0 was released (kep
 - ~~**The app is debug-signed.** Updating from a copy built on another computer fails ("App not installed") until releases are signed with one key.~~ **Fixed in 0.0.1.0**: releases carry an APK signed with the project's key; see [[Releasing]].
 
 ## Missing
+- **iMessage isn't importable yet.** Its database (`~/Library/Messages/chat.db`) is SQLite; reading it needs a small SQLite reader (plain JS, no dependencies), the `attributedBody` text of newer messages, `chat.db-wal` for the newest, and the Attachments folder. Signal has no plain export. See [[Sources]].
+- **People are matched across apps by number or name only.** Two different people with the same name link; one person under two names doesn't. Joining and splitting by hand is an idea in [[Sources]].
+- **WhatsApp exports are capped** by WhatsApp (tens of thousands of messages, fewer with media); a longer chat comes in partly. Bringing in a later export adds what's new, not what WhatsApp left out.
 - **Few unit tests.** `npm test` covers only the phone backup import (`test/restore/import-phone.mjs`). The rest of `library.js` is pure and easy to cover the same way (merging, `mediaStatus`, `checkChat`, `summarize`, `parseSums`/`formatSums`, `readLibrary` migrations).
 - **The mock test page isn't in the repo.** Recreate it under `test/mock/` from [[Testing]] so anyone can rerun the scenarios. (The big-library generator and the benchmark are: `test/perf/`.)
 - **No end-to-end check in CI** beyond syntax and manifest checks.

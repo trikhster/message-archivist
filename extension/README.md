@@ -171,6 +171,22 @@ In Settings → Backups, a chat's ⋯ menu → **Delete from backup…** (or the
 
 Single messages can't be deleted, so each chat stays a faithful copy.
 
+## Conversations from other apps
+
+Your archive can hold your chats from other apps too, beside your text messages: **WhatsApp, Telegram, Discord, Instagram, Messenger and TikTok**. Each app has its own way to export your chats; Settings → *Tools* → **Bring in conversations from other apps** → *How to export from each app* lists them. Then:
+
+1. Click **Bring in an export file…** and pick what the app gave you: WhatsApp's chat .zip (or .txt), Telegram's export folder or result.json, Discord's package.zip, Instagram's or Facebook's download .zip, or TikTok's .zip or .json. For an export you've unzipped, use **Bring in an export folder…**.
+2. It says what it found (chats and messages) before adding anything. If the export doesn't say which name is yours (a WhatsApp group, say), it asks **Which one is you?** once per app, and remembers.
+3. The chats join your archive under `conversations/<App>/` in your backup folder, with status **Imported**. Photos and videos come too when the export has them; ones it left out are listed as not saved.
+
+Good to know:
+- **Bring in a newer export later** and only what's new is added. Every message keeps the app's own ID (or a stable stand-in), so nothing is added twice.
+- **Each app's chats stay separate**: your texts and your WhatsApp chat with Alice are two conversations. The viewer links them: a chat's header shows **Also in WhatsApp · Telegram**, and **All apps** in the chat list shows one app at a time.
+- **Discord's data package has only the messages you sent**, never other people's, and its attachments are links to Discord's servers. Those chats say so.
+- WhatsApp caps how much one export holds; a very long chat may come in partly.
+- Other apps' chats can't be backed up from Google Messages or restored to a phone; those are for text messages.
+- **iMessage and Signal** aren't supported yet.
+
 ## The Android app
 
 Message Archivist also comes as an Android app that backs a phone's texts up into one file, keeps that file up to date, and puts backups back into a phone's messages. Download `message-archivist-android-v<version>.apk` from the newest release on the project's [Releases page](https://github.com/trikhster/message-archivist/releases) on the phone and open it (Android asks to allow installing apps from your browser or Files). Every release is signed with the same key, so later versions install over it.
@@ -178,9 +194,9 @@ Message Archivist also comes as an Android app that backs a phone's texts up int
 ### Back up a phone with the Android app
 1. Open Message Archivist on the phone and tap **Back up this phone**. Allow it to read your texts (and contacts, so chats have names).
 2. It shows how many messages, chats and photos there are. Leave **Include photos and videos** on for a complete copy (or turn it off for a small, quick file and add the photos later), tap **Save backup** and choose where: Downloads, Google Drive, anywhere the phone offers.
-3. When it's saved, turn on **Back up every day** to keep that file up to date by itself, and **Share** sends it anywhere you like.
+3. When it's saved, turn on **Back up automatically** to keep that file up to date by itself, and **Share** sends it anywhere you like.
 
-**Settings** (the gear on the app's first screen): **Back up by itself** on or off, which file (on the phone or online), how often (every 12 hours, day or week), photos, only while charging, only on Wi-Fi, and a notice after each backup. The first screen says whether your texts are backed up, when, and to where.
+**Settings** (the gear on the app's first screen): **Back up by itself** on or off, which file (on the phone or online), how often (every hour, 6 hours, 12 hours, day or week, or a custom number of hours or days, from 1 hour to 30 days), photos, only while charging, only on Wi-Fi, and a notice after each backup. The first screen says whether your texts are backed up, when, and to where.
 
 **Updating a backup.** **Update a backup instead…** (on the screen before Save) picks a backup made before and adds only what's new: the messages since, and its photos if it was made without them and **Include photos and videos** is on now. Messages deleted from the phone since stay in the backup. A daily backup does the same, about once a day in the background when the battery isn't low (and, for a file on Google Drive, on Wi-Fi); the app's first screen shows how the last one went, with **Back up now** and **Turn off**. On the phone's own storage an update adds to the file in place in seconds; Google Drive can't add to a file, so a backup there is copied to the phone, updated and saved back whole each time, which for a big backup with photos means a big upload.
 

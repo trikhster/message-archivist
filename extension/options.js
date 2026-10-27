@@ -21,7 +21,10 @@ function toast(text) {
   toast.t = setTimeout(() => { t.style.display = 'none'; }, 3000);
 }
 
-const STATUS = { verified: ['ok', 'Verified complete'], complete: ['ok', 'Complete'], phone: ['ok', 'From phone'], messages: ['ok', 'Messages saved, photos to fetch'], incomplete: ['warn', 'Unfinished'], problem: ['bad', 'Needs attention'] };
+const STATUS = { verified: ['ok', 'Verified complete'], complete: ['ok', 'Complete'], phone: ['ok', 'From phone'], imported: ['ok', 'Imported'], messages: ['ok', 'Messages saved, photos to fetch'], incomplete: ['warn', 'Unfinished'], problem: ['bad', 'Needs attention'] };
+// Text chats can be backed up from Google Messages; other apps' come from their exports.
+const isText = (r) => !r || GMLib.serviceOf(r) === 'sms';
+const appBadge = (r) => (isText(r) ? '' : ` <span class="app-badge" style="--app:${GMLib.SERVICES[GMLib.serviceOf(r)]?.color || '#888'}" title="From ${esc(GMLib.serviceLabel(GMLib.serviceOf(r)))}">${esc(GMLib.serviceLabel(GMLib.serviceOf(r)))}</span>`);
 const statusPill = (st, title = '') => { const [k, label] = STATUS[st] || ['warn', 'Unknown']; return `<span class="st ${k}"${title ? ` title="${esc(title)}"` : ''}>${label}</span>`; };
 const when = (ms) => ms ? new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'never';
 
@@ -435,10 +438,10 @@ async function renderIndex() {
   const cov = lib.exp ? GMLib.verificationOf(rows, lib.state, chrome.runtime.getManifest().version).full.coverage : null;
   health = {
     rows,
-    unfinished: indexItems.filter((x) => x.id && !x.id.startsWith('folder:') && (x.row?.status === 'incomplete' || (x.job && !x.row))).map((x) => x.row || { id: x.id, title: x.title }),
-    waiting: rows.filter((r) => r.id && mc(r).waiting),
-    thumbs: rows.filter((r) => r.id && mc(r).thumbnail),
-    failed: rows.filter((r) => r.id && (mc(r).failed || (mc(r).skipped && $('previewPics').checked))),
+    unfinished: indexItems.filter((x) => x.id && !x.id.startsWith('folder:') && isText(x.row) && (x.row?.status === 'incomplete' || (x.job && !x.row))).map((x) => x.row || { id: x.id, title: x.title }),
+    waiting: rows.filter((r) => r.id && isText(r) && mc(r).waiting),
+    thumbs: rows.filter((r) => r.id && isText(r) && mc(r).thumbnail),
+    failed: rows.filter((r) => r.id && isText(r) && (mc(r).failed || (mc(r).skipped && $('previewPics').checked))),
     missing: cov ? [...cov.not_backed_up, ...cov.unfinished.filter((u) => !rows.some((r) => r.id === u.id))] : [],
   };
   // Fix-everything buttons, only for what applies.
@@ -455,9 +458,12 @@ async function renderIndex() {
 
 function drawIndex() {
   const q = $('indexFind').value.trim().toLowerCase();
-  const counts = FILTERS.map(([id, , f]) => indexItems.filter(f).length);
-  $('indexFilters').innerHTML = FILTERS.map(([id, label], i) => (i === 0 || counts[i] ? `<button data-filter="${id}" aria-pressed="${indexFilter === id}">${label}<span class="n">${counts[i].toLocaleString()}</span></button>` : '')).join('');
-  const f = (FILTERS.find(([id]) => id === indexFilter) || FILTERS[0])[2];
+  // A filter per app, once there's more than one in the library.
+  const apps = [...new Set(indexItems.map((x) => GMLib.serviceOf(x.row)))];
+  const filters = apps.length > 1 ? [...FILTERS, ...apps.map((a) => [`app:${a}`, GMLib.serviceLabel(a), (x) => GMLib.serviceOf(x.row) === a])] : FILTERS;
+  const counts = filters.map(([id, , f]) => indexItems.filter(f).length);
+  $('indexFilters').innerHTML = filters.map(([id, label], i) => (i === 0 || counts[i] ? `<button data-filter="${id}" aria-pressed="${indexFilter === id}">${label}<span class="n">${counts[i].toLocaleString()}</span></button>` : '')).join('');
+  const f = (filters.find(([id]) => id === indexFilter) || FILTERS[0])[2];
   // As every list of chats: favourites, then names A–Z, then numbers.
   const order = GMLib.chatOrder((x) => !!x.row && GMLib.isFavourite(x.row));
   const list = indexItems.filter((x) => f(x) && (!q || (x.title || '').toLowerCase().includes(q) || GMLib.formatNumber(x.title).toLowerCase().includes(q)))
@@ -472,7 +478,7 @@ function drawIndex() {
     const status = r?.folderGone ? '<span class="st bad">Folder missing</span><div class="secondary">Its files were deleted outside the extension. Use ⋯ → Delete to take it off the list.</div>'
       : r ? `${statusPill(r.status, (r.problems || []).join(', '))}${r.problems?.length ? `<div class="secondary">${esc(r.problems.join(', '))}</div>` : ''}`
       : `<span class="st warn">Not backed up yet</span>${x.job?.lastResult ? `<div class="secondary">${esc(x.job.lastResult.slice(0, 80))}</div>` : ''}`;
-    const canRun = x.id && !x.id.startsWith('folder:');
+    const canRun = x.id && !x.id.startsWith('folder:') && isText(r);
     const menu = [
       canRun && (c.waiting || c.failed) && `<button data-act="fetch">Fetch ${(c.waiting + c.failed).toLocaleString()} photos</button>`,
       canRun && c.thumbnail && `<button data-act="upgrade">Upgrade ${c.thumbnail.toLocaleString()} to full size</button>`,
@@ -480,7 +486,7 @@ function drawIndex() {
       r && `<button data-act="delete" class="danger-text" data-delete="${esc(r.folder)}">Delete from backup…</button>`,
     ].filter(Boolean).join('');
     return `<tr class="chat-row" data-i="${i}" data-id="${esc(x.id)}">
-      <td class="c-chat"><b>${x.title ? esc(GMLib.formatNumber(x.title)) : '<i class="gray">Unnamed chat</i>'}</b>${r?.pinned ? ' <span title="Pinned in Google Messages">📌</span>' : r && GMLib.isFavourite(r) ? ' <span title="A starred contact on the phone">⭐</span>' : ''}${r ? `<div class="secondary">${(r.count || 0).toLocaleString()} message${r.count === 1 ? '' : 's'} · ${esc((r.first || '?').slice(0, 10))} – ${esc((r.last || '?').slice(0, 10))}${r.contact?.people?.some((p) => p.num) ? '' : ' · no phone number yet'}</div>` : ''}</td>
+      <td class="c-chat"><b>${x.title ? esc(GMLib.formatNumber(x.title)) : '<i class="gray">Unnamed chat</i>'}</b>${appBadge(r)}${r?.pinned ? ' <span title="Pinned in Google Messages">📌</span>' : r && GMLib.isFavourite(r) ? ' <span title="A starred contact on the phone">⭐</span>' : ''}${r ? `<div class="secondary">${(r.count || 0).toLocaleString()} message${r.count === 1 ? '' : 's'} · ${esc((r.first || '?').slice(0, 10))} – ${esc((r.last || '?').slice(0, 10))}${r.contact?.people?.some((p) => p.num) ? '' : ' · no phone number yet'}</div>` : ''}</td>
       <td>${status}</td>
       <td class="media-cell">${r ? mediaCell(c) : '—'}</td>
       <td>${canRun ? `<select class="every" data-id="${esc(x.id)}" title="Back up by itself">${everyOpts(x.job)}</select>` : ''}</td>
@@ -727,7 +733,8 @@ async function renderRestore() {
   $('exportPhone').disabled = $('exportPackage').disabled = !!(lib.noFolder || lib.needsAccess || !lib.rows?.length);
   if (lib.noFolder) { box.innerHTML = '<div class="empty">Choose a backup folder first: Settings → Backup folder.</div>'; $('restoreLeft').innerHTML = ''; return; }
   if (lib.needsAccess) { box.innerHTML = `<div class="home-status">${accessHtml(lib.dir)}</div>`; $('restoreLeft').innerHTML = ''; return; }
-  const rows = lib.rows;
+  // Only text chats go back on a phone as texts; other apps' chats stay in the archive.
+  const rows = lib.rows.filter((r) => GMLib.serviceOf(r) === 'sms');
   const ready = rows.filter((r) => restoreAddrs(r.contact?.people, r.title).length);
   const left = rows.filter((r) => !ready.includes(r));
   const msgs = ready.reduce((n, r) => n + (r.count || 0), 0);
@@ -782,8 +789,9 @@ $('exportPhone').onclick = async () => {
     let count = 0;
     let pics = 0;
     const left = [];
-    for (const [i, row] of lib.rows.entries()) {
-      note(`Writing ${i + 1} of ${lib.rows.length}: ${row.title} (${count.toLocaleString()} messages so far)…`);
+    const textRows = lib.rows.filter((r) => GMLib.serviceOf(r) === 'sms');
+    for (const [i, row] of textRows.entries()) {
+      note(`Writing ${i + 1} of ${textRows.length}: ${row.title} (${count.toLocaleString()} messages so far)…`);
       const data = await jsonAt(dir, `${row.folder}/messages.json`);
       if (!data) continue;
       if (!restoreAddrs(data.contact?.people || row.contact?.people, row.title).length) { left.push(row.title); continue; }
@@ -864,8 +872,9 @@ $('exportPackage').onclick = async () => {
     const counts = { threads: 0, messages: 0, sms: 0, mms: 0, media: 0, media_bytes: 0 };
     const left = [];
     let mediaN = 0;
-    for (const [i, row] of lib.rows.entries()) {
-      note(`Packing ${i + 1} of ${lib.rows.length}: ${row.title} (${counts.messages.toLocaleString()} messages so far)…`);
+    const textRows = lib.rows.filter((r) => GMLib.serviceOf(r) === 'sms');
+    for (const [i, row] of textRows.entries()) {
+      note(`Packing ${i + 1} of ${textRows.length}: ${row.title} (${counts.messages.toLocaleString()} messages so far)…`);
       const data = await jsonAt(dir, `${row.folder}/messages.json`);
       if (!data) continue;
       const addrs = restoreAddrs(data.contact?.people || row.contact?.people, row.title);
@@ -1209,7 +1218,7 @@ document.addEventListener('click', async (e) => {
 function zipExports(zip, label) {
   const byRoot = new Map();
   for (const n of zip.names) {
-    const m = n.match(/^((?:[^/]+\/){0,3}?)(conversations\/[^/]+)\/messages\.json$/);
+    const m = n.match(/^((?:[^/]+\/){0,3}?)(conversations\/(?:[^/]+\/)?[^/]+)\/messages\.json$/);
     if (!m) continue;
     if (!byRoot.has(m[1])) byRoot.set(m[1], []);
     byRoot.get(m[1]).push(m[2]);
@@ -1226,7 +1235,13 @@ async function findExports(dir, note) {
           const chats = [];
           for await (const [n, c] of h.entries()) {
             if (c.kind !== 'directory') continue;
-            try { await c.getFileHandle('messages.json'); chats.push(`conversations/${n}`); } catch { /* not a chat */ }
+            try { await c.getFileHandle('messages.json'); chats.push(`conversations/${n}`); } catch {
+              // Another app's folder (conversations/<App>/<chat>/).
+              for await (const [n2, c2] of c.entries()) {
+                if (c2.kind !== 'directory') continue;
+                try { await c2.getFileHandle('messages.json'); chats.push(`conversations/${n}/${n2}`); } catch { /* not a chat */ }
+              }
+            }
           }
           if (chats.length) found.push({ name: label, chats, read: async (p) => { try { return await fileAt(d, p); } catch { return null; } } });
         } else if (depth < 3 && !/^(media|contact|logs|\..*)$/.test(name)) {
@@ -1292,8 +1307,13 @@ async function phoneSource(file) {
 
 async function importChat(io, rows, src, chatPath, data, report, log) {
   const title = data.conversation || chatPath.split('/').pop();
-  const row = src.phone ? GMLib.phoneRowFor(rows, src.thread(chatPath))
-    : rows.find((r) => r.id && data.conversation_id && r.id === data.conversation_id) || rows.find((r) => (!r.id || !data.conversation_id) && r.title === title);
+  // A chat only ever joins one from the same app: a WhatsApp chat with Alice
+  // and the text chat with Alice stay two chats.
+  const service = data.service || src.service || 'sms';
+  const same = rows.filter((r) => GMLib.serviceOf(r) === service);
+  const row = src.phone ? GMLib.phoneRowFor(same, src.thread(chatPath))
+    : same.find((r) => r.id && data.conversation_id && r.id === data.conversation_id) || same.find((r) => (!r.id || !data.conversation_id) && r.title === title);
+  const fromApp = service !== 'sms' && src.importer;
   let folder;
   let libData = null;
   let progress = null;
@@ -1302,7 +1322,7 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
     try { libData = JSON.parse((await io.readText(`${folder}/messages.json`)) || 'null'); } catch { /* start it again */ }
     try { progress = JSON.parse((await io.readText(`${folder}/progress.json`)) || 'null'); } catch { /* none */ }
   } else {
-    const base = `conversations/${GMLib.safeName(title)}`;
+    const base = GMLib.chatFolder(service, title);
     for (let n = 1; ; n++) {
       folder = n === 1 ? base : `${base} (${n})`;
       if (!rows.some((r) => r.folder.toLowerCase() === folder.toLowerCase()) && !(await io.exists(`${folder}/messages.json`))) break;
@@ -1390,7 +1410,13 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
   // chat as the phone did ("From phone"); an export says in its own
   // progress.json; otherwise it's unknown until it's read from Messages.
   let known = progress;
-  if (!known) {
+  if (fromApp) {
+    // Another app's export: the chat as that export had it ("Imported"),
+    // or only part of it (Discord's package has only your own messages).
+    const partial = data.partial || src.partial || null;
+    known = { ...(known || {}), complete: false, history_complete: false, imported: { service, importer: src.importer, file: src.name, at: new Date().toISOString(), ...(partial ? { partial } : {}) } };
+    delete known.from_phone;
+  } else if (!known) {
     let theirs = null;
     if (!src.phone) try { theirs = JSON.parse((await (await src.read(`${chatPath}/progress.json`))?.text()) || 'null'); } catch { /* none */ }
     known = theirs && (theirs.history_complete ?? theirs.complete)
@@ -1399,14 +1425,14 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
   }
   const fromPhone = src.phone && !(known.history_complete ?? known.complete) && !known.from_phone;
   if (src.phone && !(known.history_complete ?? known.complete)) known = { ...known, from_phone: { file: src.name, at: src.manifest.updated_at || src.manifest.created_at || null } };
-  if (row && libData && !fresh.length && !filled && contact === libData.contact && !fromPhone) return null;
+  if (row && libData && !fresh.length && !filled && contact === libData.contact && !fromPhone && !fromApp) return null;
 
   const merged = GMLib.mergeChrono(saved, fresh, incoming);
   const media = merged.flatMap((m) => m.media || []);
   const now = new Date().toISOString();
   const base = libData || data;
   const { range, ...rest } = base;
-  const out = { ...rest, conversation: base.conversation || title, conversation_id: base.conversation_id || data.conversation_id || null, exported_at: base.exported_at || now, updated_at: now,
+  const out = { ...rest, ...(service !== 'sms' ? { service } : {}), conversation: base.conversation || title, conversation_id: base.conversation_id || data.conversation_id || null, exported_at: base.exported_at || now, updated_at: now,
     participants: [...new Set(merged.map((m) => m.sender))], message_count: merged.length, media_count: media.filter((x) => x.file).length, media_failed: media.filter((x) => !x.file).length, messages: merged, ...(contact ? { contact } : {}) };
   const dated = merged.filter((m) => m.timestamp);
   const prog = {
@@ -1548,6 +1574,58 @@ let importedRows = [];
 $('importFolder').onclick = () => importExports('folder');
 $('importZip').onclick = () => importExports('zip');
 $('importPhone').onclick = () => importExports('phone');
+
+// ---------- bring in conversations from other apps ----------
+// Each app's own export (importers/), read into library chats and merged like
+// any other export: matched to chats of the same app, only new messages added.
+
+// "Which one is you?": asked when an export doesn't say whose it is, and
+// remembered per app (Settings keeps the names in chrome.storage, `myNames`).
+async function whoAmI(service, names, hint = {}) {
+  const store = (await chrome.storage.local.get('myNames')).myNames || {};
+  const known = (store[service] || []).find((n) => names.includes(n));
+  if (known) return known;
+  if (!names.length) return null;
+  const pick = await new Promise((resolve) => {
+    $('whoText').textContent = `In ${GMLib.serviceLabel(service)}${hint.chat ? ` (“${hint.chat}”)` : ''}, which name is yours? Your messages are shown on your side, and the name is remembered for next time.`;
+    $('whoList').innerHTML = names.slice(0, 40).map((n, i) => `<button class="outlined" data-who="${i}" style="text-align:left">${esc(n)}</button>`).join('');
+    $('whoList').onclick = (e) => { const b = e.target.closest('[data-who]'); if (b) { $('whoDlg').close(); resolve(names[+b.dataset.who]); } };
+    $('whoSkip').onclick = () => { $('whoDlg').close(); resolve(null); };
+    $('whoDlg').showModal();
+  });
+  if (pick) await chrome.storage.local.set({ myNames: { ...store, [service]: [...new Set([...(store[service] || []), pick])] } });
+  return pick;
+}
+
+$('appHow').innerHTML = GMImport.list().map((i) => `<li><b>${esc(i.label)}:</b> ${esc(i.how)}</li>`).join('');
+
+async function importFromApp(pickFolder) {
+  const note = (t) => { $('importAppMsg').textContent = t; };
+  const lines = [];
+  try {
+    const dir = await folderForReading();
+    const picked = pickFolder ? [await window.showDirectoryPicker({ id: 'gm-import-app', mode: 'read' })]
+      : await Promise.all((await window.showOpenFilePicker({ id: 'gm-import-app', multiple: true })).map((h) => h.getFile()));
+    const ctx = { whoAmI, locale: navigator.language };
+    const sources = [];
+    for (const p of picked) {
+      note(`Reading ${p.name}…`);
+      try { sources.push((await GMImport.open(p, ctx)).source); } catch (e) { note(e.message); if (picked.length === 1) return; lines.push(`[${new Date().toISOString()}] ! ${e.message}`); }
+    }
+    if (!sources.length) return;
+    const describe = (src) => `• ${src.name}: ${src.chats.length.toLocaleString()} ${GMLib.serviceLabel(src.chat(src.chats[0])?.data.service || src.service)} chat${src.chats.length === 1 ? '' : 's'}, ${src.chats.reduce((n, k) => n + src.chat(k).data.messages.length, 0).toLocaleString()} messages`;
+    const partial = sources.find((x) => x.partial);
+    if (!confirm(`Bring these into “${dir.name}”?\n\n${sources.map(describe).join('\n')}\n\n${partial ? `${partial.partial}\n\n` : ''}They’re kept beside your other chats, marked with their app. Only messages that aren’t here yet are added; the export isn’t changed.`)) { note(''); return; }
+    await mergeExports(dir, sources, note, lines);
+    $('importAppMsg').innerHTML = $('importMsg').innerHTML;
+    $('importMsg').innerHTML = '';
+    await getLib(true);
+  } catch (e) {
+    if (e.name !== 'AbortError') note(e.message);
+  }
+}
+$('importApp').onclick = () => importFromApp(false);
+$('importAppFolder').onclick = () => importFromApp(true);
 document.addEventListener('click', async (e) => {
   if (e.target.id !== 'importToList') return;
   const s = await getSettings();

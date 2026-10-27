@@ -1,10 +1,11 @@
 # Message Archivist
 
-A Chrome MV3 extension (plain JavaScript, no build step, no dependencies) that backs up Google Messages for Web into a folder on the user's computer, and an Android app that restores those backups to a phone and backs a phone up. The extension is `extension/`; the app (Kotlin with Jetpack Compose) is `android/` (`cd android && ./gradlew assembleDebug`; see `notes/Modules/Android app.md`).
+A Chrome MV3 extension (plain JavaScript, no build step, no dependencies) that backs up Google Messages for Web into a folder on the user's computer, and brings other apps' chats (WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok) into the same archive from their exports, and an Android app that restores those backups to a phone and backs a phone up. The extension is `extension/`; the app (Kotlin with Jetpack Compose) is `android/` (`cd android && ./gradlew assembleDebug`; see `notes/Modules/Android app.md`).
 
 ## Developer notes
 `notes/` is an Obsidian vault with the project's developer notes. Start at `notes/Home.md`, then read the notes for the area you're changing:
 - how it fits together: `notes/Architecture.md`, `notes/Backup run.md`, `notes/Messages between parts.md`
+- one archive for every app (other apps' exports, `extension/importers/`): `notes/Sources.md`, `notes/Modules/Importers.md`
 - what's on disk: `notes/Library format.md`, `notes/Photo statuses and runs.md`, `notes/Storage and settings.md`
 - each file: `notes/Modules/`
 - before touching page reading: `notes/Google Messages page.md`, `notes/Gotchas.md`

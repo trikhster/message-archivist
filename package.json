@@ -10,7 +10,7 @@
   },
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node test/restore/import-phone.mjs extension/library.js",
+    "test": "node test/restore/import-phone.mjs extension/library.js && node test/importers/run.mjs",
     "package": "node scripts/check.mjs && node scripts/package.mjs",
     "set-version": "node scripts/set-version.mjs"
   },

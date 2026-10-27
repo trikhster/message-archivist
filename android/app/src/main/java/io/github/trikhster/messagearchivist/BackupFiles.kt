@@ -85,7 +85,8 @@ object BackupFiles {
 
 /**
  * Backing up by itself: a scheduled job brings the chosen backup file up to
- * date every 12 hours, day or week (Settings), when the battery isn't low, and
+ * date every hour, 6 or 12 hours, day or week, or every so many hours or days
+ * (Settings, 1 hour to 30 days), when the battery isn't low, and
  * if asked only while charging or on Wi-Fi (the default for a file on Google
  * Drive or other online storage). Only what's new is added, so it takes
  * seconds. A run that goes wrong says so in a notification (and one that
@@ -95,6 +96,9 @@ object Daily {
     private const val PREFS = "daily_backup"
     private const val JOB = 7
     private val LOCAL = setOf("com.android.externalstorage.documents", "com.android.providers.downloads.documents", "com.android.providers.media.documents")
+
+    /** How often it may be asked to run: every hour to every 30 days. */
+    val HOURS = 1..720
 
     data class Setup(
         val uri: Uri, val name: String, val withMedia: Boolean,
@@ -107,7 +111,7 @@ object Daily {
     fun setup(ctx: Context): Setup? = prefs(ctx).let { p ->
         p.getString("uri", null)?.let { u ->
             val uri = Uri.parse(u)
-            Setup(uri, p.getString("name", "") ?: "", p.getBoolean("media", true), p.getInt("every", 24), p.getBoolean("charging", false), p.getBoolean("wifi", !isLocal(uri)), p.getBoolean("notify", false))
+            Setup(uri, p.getString("name", "") ?: "", p.getBoolean("media", true), p.getInt("every", 24).coerceIn(HOURS), p.getBoolean("charging", false), p.getBoolean("wifi", !isLocal(uri)), p.getBoolean("notify", false))
         }
     }
     fun last(ctx: Context): Last? = prefs(ctx).takeIf { it.contains("at") }?.let { Last(it.getLong("at", 0), it.getInt("added", 0), it.getString("error", null)) }
@@ -118,8 +122,10 @@ object Daily {
         prefs(ctx).edit().putString("uri", s.uri.toString()).putString("name", s.name).putBoolean("media", s.withMedia)
             .putInt("every", s.everyHours).putBoolean("charging", s.charging).putBoolean("wifi", s.wifi).putBoolean("notify", s.notify)
             .apply { if (!sameFile) { remove("at"); remove("added"); remove("error") } }.apply()
+        val period = TimeUnit.HOURS.toMillis(s.everyHours.coerceIn(HOURS).toLong())
         ctx.getSystemService(JobScheduler::class.java).schedule(JobInfo.Builder(JOB, ComponentName(ctx, DailyBackupService::class.java))
-            .setPeriodic(TimeUnit.HOURS.toMillis(s.everyHours.toLong()), TimeUnit.HOURS.toMillis(maxOf(1L, s.everyHours / 4L)))
+            // A quarter of the period is the window Android may run it in (15 minutes at least).
+            .setPeriodic(period, maxOf(TimeUnit.MINUTES.toMillis(15), period / 4))
             .setRequiresBatteryNotLow(true)
             .setRequiresCharging(s.charging)
             .setPersisted(true)

@@ -11,6 +11,7 @@ updated: 2026-10-26
 | `runs` | content `recordRun()`, options (imports, clean-ups) | last 30 runs: `{ at, kind, target, ok, summary, added, log[] }` |
 | `chatStatus` | background on `gm-backup-status` | per chat ID: `{ title, complete, count, oldest, status, media, at }`, read by the popup |
 | `restore` (`chrome.storage.session`) | background `compactWindow()` | per tab ID: the bounds and state of a window shrunk for a backup, given back by `gm-restore-window`. Session storage survives the worker being stopped, not a browser restart |
+| `myNames` | options `whoAmI()` | per service: the names that are you in that app's exports ("Which one is you?"), e.g. `{ whatsapp: ['Alex Doe'] }` ([[Sources]]) |
 | `theme` | `theme.js` (`GMTheme.set`) | `light`, `dark` or `system`; mirrors the extension pages' choice so the progress panel on the Messages tab matches |
 
 Every part reads settings through `GMLib.normalizeSettings()` (`library.js`, loaded by the content script, background worker, popup and Settings), so defaults live in one place: `GMLib.SETTINGS_DEFAULTS`. `saveSettings(patch)` merges into the normalised object, which also saves the migration.

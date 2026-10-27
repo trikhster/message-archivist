@@ -11,6 +11,7 @@ Pure functions shared by the [[Content script]] and the [[Settings page]] (loade
 ## Exports by section
 | Section | Exports | Notes |
 |---|---|---|
+| apps | `SERVICES`, `serviceOf`, `serviceLabel`, `chatFolder`, `importedRecord` | every app a chat can come from, where its folder goes, and one message from an importer in the library's shape ([[Sources]]) |
 | settings | `SETTINGS_VERSION`, `SETTINGS_DEFAULTS`, `normalizeSettings` | the one definition every part uses, and the 0.4.x migration ([[Storage and settings]]) |
 | merging | `sigOf`, `keyOf`, `unknownIn`, `mergeChrono` | key = message ID, else timestamp + sender + text + media count. `mergeChrono(saved, added, scraped)` keeps order and takes the latest version of messages already saved (read receipts, reactions, edits) |
 | the same picture twice | `imageFingerprint`, `sameImage`, `betterCopy` | a tiny size-independent fingerprint; keep the GIF over its still, else the larger |
