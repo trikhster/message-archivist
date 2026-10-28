@@ -161,7 +161,8 @@ async function sendToTab(tab, msg) {
   try {
     return await chrome.tabs.sendMessage(tab.id, msg);
   } catch {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['zip.js', 'library.js', 'content.js'] });
+    // The content script's files, as the manifest lists them (the app modules too).
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: chrome.runtime.getManifest().content_scripts[0].js });
     return chrome.tabs.sendMessage(tab.id, msg);
   }
 }
@@ -334,9 +335,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       keepVisible(sender.tab).then(reply, () => reply({ changed: false }));
       return true;
     case 'gm-open-backup':
-      // "Open my backup": the viewer, reading straight from the backup folder.
-      // A hash opens a view in it, e.g. #labels/<chat ID> for one chat's labels.
-      chrome.tabs.create({ url: chrome.runtime.getURL(`viewer.html?library=1${/^[\w/%.-]*$/.test(msg.hash || '') && msg.hash ? `#${msg.hash}` : ''}`) });
+      // "Open my backup": Settings' Archive tab, the viewer reading straight from
+      // the backup folder. A hash opens a view in it, e.g. labels/<chat ID> for one chat's labels.
+      chrome.tabs.create({ url: chrome.runtime.getURL(`options.html#archive${/^[\w/%.-]*$/.test(msg.hash || '') && msg.hash ? `/${msg.hash}` : ''}`) });
       return false;
     case 'gm-open-messages':
       // Brings an open Google Messages tab forward, or opens one.
@@ -352,6 +353,33 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     case 'gm-clear-badge':
       chrome.action.setBadgeText({ text: '' });
       return false;
+    case 'gm-web-capture':
+      // From an app's web page reader (web/<app>.js): what it read of the chat
+      // open there, kept until Settings brings it into the archive.
+      saveCapture(msg, sender).then(() => reply({ ok: true }), (e) => reply({ ok: false, error: e.message }));
+      return true;
   }
   return false;
 });
+
+// ---------- captures from apps' web pages ----------
+// An app module with a web page reader (modules/<app>.js `web`, its script in
+// web/) sends what it reads of the chat open there. Each chat is kept apart,
+// `webcap:<service>:<chat id>` = { chat, items: { <key>: item }, updated_at },
+// an item replacing the one with its key (read again, or edited), until
+// Settings' Apps tab puts them in the archive; the keys it put there are kept
+// (`webdone:<service>:<chat id>`), so reading the chat again doesn't queue them again.
+async function saveCapture({ service, chat, items }, sender) {
+  const m = { snapchat: 'https://www.snapchat.com/web' }[service];
+  if (!m || !String(sender?.url || '').startsWith(m)) throw new Error('not from that app’s web page');
+  if (!chat?.id || !/^[\w-]{1,80}$/.test(chat.id) || !Array.isArray(items)) throw new Error('not a capture');
+  const key = `webcap:${service}:${chat.id}`;
+  const doneKey = `webdone:${service}:${chat.id}`;
+  const got = await chrome.storage.local.get([key, doneKey]);
+  const was = got[key] || { items: {} };
+  const done = new Set(got[doneKey] || []);
+  const fresh = items.filter((it) => it?.key && !done.has(it.key));
+  if (!fresh.length) return;
+  for (const it of fresh) was.items[it.key] = { ...was.items[it.key], ...it };
+  await chrome.storage.local.set({ [key]: { chat: { ...was.chat, ...chat }, items: was.items, updated_at: Date.now() } });
+}

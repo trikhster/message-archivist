@@ -1,4 +1,7 @@
 const $ = (id) => document.getElementById(id);
+// The app (app/app.js): this page is its home page, without what needs a
+// Google Messages tab (marked ext-only in options.html).
+const APP = !!window.MA_APP;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const EVERY = { 0: 'When I click “Back up all now”', 1: 'Every hour', 6: 'Every 6 hours', 12: 'Every 12 hours', 24: 'Every day', 168: 'Every week' };
 
@@ -6,8 +9,12 @@ async function getSettings() {
   const { settings } = await chrome.storage.local.get('settings');
   return GMLib.normalizeSettings(settings);
 }
-async function saveSettings(patch) {
-  await chrome.storage.local.set({ settings: { ...(await getSettings()), ...patch } });
+// One save at a time: each reads the settings and writes them back, so two
+// switches flipped together would otherwise lose the first.
+let settingsSaved = Promise.resolve();
+function saveSettings(patch) {
+  settingsSaved = settingsSaved.catch(() => {}).then(async () => chrome.storage.local.set({ settings: { ...(await getSettings()), ...patch } }));
+  return settingsSaved;
 }
 
 function toast(text) {
@@ -22,34 +29,122 @@ function toast(text) {
 }
 
 const STATUS = { verified: ['ok', 'Verified complete'], complete: ['ok', 'Complete'], phone: ['ok', 'From phone'], imported: ['ok', 'Imported'], messages: ['ok', 'Messages saved, photos to fetch'], incomplete: ['warn', 'Unfinished'], problem: ['bad', 'Needs attention'] };
-// Text chats can be backed up from Google Messages; other apps' come from their exports.
+// Where a chat came from: its source (app) and, for a second account in it,
+// which one: "Google Messages", "Google Messages · (555) 010-0199", "WhatsApp".
+// The main account shows its number or ID too once its app has a second one (accounts.json).
+let mainAccounts = {};
+const sourceName = (r) => {
+  const svc = GMLib.serviceOf(r);
+  const acct = r?.account ? (r.account_label || GMLib.accountLabel(r.account)) : multiAccount.has(svc) ? mainAccounts[svc]?.label : null;
+  return `${GMLib.serviceLabel(svc)}${acct ? ` · ${acct}` : ''}`;
+};
+const sourceKey = (r) => `${GMLib.serviceOf(r)}|${GMLib.accountKey(r?.account)}`;
+// "From Google Messages 18 · WhatsApp 1 · Telegram 1", once there's more than one.
+const appsLine = (rows) => {
+  const n = new Map();
+  for (const r of rows) { const k = sourceName(r); n.set(k, (n.get(k) || 0) + 1); }
+  return n.size > 1 ? `<div class="secondary">From ${[...n].map(([k, v]) => `${esc(k)} ${v.toLocaleString()}`).join(' · ')}</div>` : '';
+};
+// Text chats (Google Messages, any account) can go back on a phone.
 const isText = (r) => !r || GMLib.serviceOf(r) === 'sms';
-const appBadge = (r) => (isText(r) ? '' : ` <span class="app-badge" style="--app:${GMLib.SERVICES[GMLib.serviceOf(r)]?.color || '#888'}" title="From ${esc(GMLib.serviceLabel(GMLib.serviceOf(r)))}">${esc(GMLib.serviceLabel(GMLib.serviceOf(r)))}</span>`);
+// Google Messages for Web reads only the phone it's paired with: backing up,
+// fetching photos and the backup list are for the main account's chats.
+const isLive = (r) => !r || (GMLib.serviceOf(r) === 'sms' && !r.account);
+// Badges once there's more than one source: every chat but the main Google
+// Messages ones, which get one too when Google Messages has a second account.
+let multiAccount = new Set();
+function noteAccounts(rows) {
+  const by = new Map();
+  for (const r of rows || []) { const k = GMLib.serviceOf(r); if (!by.has(k)) by.set(k, new Set()); by.get(k).add(GMLib.accountKey(r.account)); }
+  multiAccount = new Set([...by].filter(([, v]) => v.size > 1).map(([k]) => k));
+}
+const appBadge = (r) => (isLive(r) && !multiAccount.has('sms') ? '' : ` <span class="app-badge" style="--app:${GMLib.SERVICES[GMLib.serviceOf(r)]?.color || '#888'}" title="From ${esc(sourceName(r))}">${esc(sourceName(r))}</span>`);
 const statusPill = (st, title = '') => { const [k, label] = STATUS[st] || ['warn', 'Unknown']; return `<span class="st ${k}"${title ? ` title="${esc(title)}"` : ''}>${label}</span>`; };
 const when = (ms) => ms ? new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'never';
 
 // ---------- tabs ----------
-// Home, Backups (every chat), Phone restore, Tools, Settings. The tab is in the
-// address (#backups…), so links from the popup and viewer land on the right one.
-const TABS = ['home', 'backups', 'restore', 'tools', 'settings'];
+// Archive (the viewer, in this page), Home, Backups (every chat), Phone restore,
+// Tools, Settings, Apps (a card per app module). The tab is in the address
+// (#backups…), so links from the popup and viewer land on the right one;
+// #archive/<viewer address> opens the archive there (#archive/chat-id/<id>,
+// #archive/contacts…).
+const TABS = ['archive', 'home', 'backups', 'restore', 'tools', 'settings', 'apps'];
 const WELCOME = location.hash === '#welcome'; // first install: keep the setup steps showing
 let tab = 'home';
 let routed = false;
+// The menu down the left: the archive's views (data-view, as the viewer names
+// them: chats, people, contacts…), then Home to Apps (data-tab).
+let archiveView = 'chats';
+function markMenu() {
+  for (const b of document.querySelectorAll('nav.tabs button[data-tab]')) {
+    const on = b.dataset.tab === tab && (tab !== 'archive' || b.dataset.view === archiveView);
+    b.setAttribute('aria-selected', String(on));
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  }
+}
+// ☰ collapses the menu to its icons (on a narrow window, to the title bar),
+// remembered in this browser. Collapsed, each entry's name is its tooltip.
+function collapseMenu(collapsed) {
+  document.body.classList.toggle('menu-collapsed', collapsed);
+  const label = collapsed ? 'Expand the menu' : 'Collapse the menu';
+  $('menuBtn').setAttribute('aria-expanded', String(!collapsed));
+  $('menuBtn').title = label;
+  $('menuBtn').setAttribute('aria-label', label);
+  for (const b of document.querySelectorAll('nav.tabs button')) {
+    if (collapsed && !b.title) { b.title = b.textContent.trim(); b.dataset.nameTip = '1'; }
+    if (!collapsed && b.dataset.nameTip) { b.removeAttribute('title'); delete b.dataset.nameTip; }
+  }
+  try { localStorage.setItem('ma-menu', collapsed ? 'collapsed' : 'open'); } catch { /* storage blocked */ }
+}
+$('menuBtn').onclick = () => collapseMenu(!document.body.classList.contains('menu-collapsed'));
+try { if (localStorage.getItem('ma-menu') === 'collapsed') collapseMenu(true); } catch { /* storage blocked */ }
+void document.body.offsetWidth; // lay it out as it opens, so only later changes animate
+document.body.classList.add('menu-ready');
 function showTab(name, { push = true } = {}) {
   if (!TABS.includes(name)) name = 'home';
   tab = name;
-  for (const b of document.querySelectorAll('nav.tabs button')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
+  markMenu();
   for (const t of TABS) $(`tab-${t}`).hidden = t !== name;
+  document.body.classList.toggle('archive-on', name === 'archive');
   if (push && location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
   refreshTab();
 }
-document.querySelector('nav.tabs').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) showTab(b.dataset.tab); });
+// The viewer's addresses for its views (#chat, #stats…; the rest are their own names).
+const VIEW_HASH = { chats: 'chat', stats: 'stats/all' };
+document.querySelector('nav.tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-tab]');
+  if (!b) return;
+  if (b.dataset.view) { archiveView = b.dataset.view; openArchive(VIEW_HASH[b.dataset.view] || b.dataset.view); markMenu(); } else showTab(b.dataset.tab);
+});
+
+// The archive is the viewer in a frame (viewer.html?library=1&embedded=1),
+// loaded the first time the tab opens and again after anything changed the
+// backup (a run, an import, a delete), so it never shows a stale copy.
+let archiveStale = true;
+function openArchive(hash = '') {
+  const f = $('archiveFrame');
+  if (archiveStale || !f.src) { archiveStale = false; f.src = `viewer.html?library=1&embedded=1${hash ? `#${hash}` : ''}`; }
+  else if (hash) f.contentWindow.location.hash = hash;
+  if (tab !== 'archive') showTab('archive');
+}
+// The viewer says which view it's on (ma-view), so the menu shows it, and asks
+// for Settings (Delete, no folder yet) by message (ma-settings), as it's in this page.
+addEventListener('message', (e) => {
+  if (e.source !== $('archiveFrame').contentWindow) return;
+  if (e.data?.type === 'ma-view') { archiveView = String(e.data.view || 'chats'); markMenu(); return; }
+  if (e.data?.type !== 'ma-settings') return;
+  const h = String(e.data.hash || 'home');
+  if (h.startsWith('delete:')) { showTab('backups'); askDelete(decodeURIComponent(h.slice(7)), false); }
+  else showTab(TABS.includes(h) ? h : 'home');
+});
 // What a tab shows is read when it's opened (and again when something changes), not all at once.
 function refreshTab() {
-  if (tab === 'home') renderHome();
+  if (tab === 'archive') { if (archiveStale || !$('archiveFrame').src) openArchive(); }
+  else if (tab === 'home') renderHome();
   else if (tab === 'backups') renderIndex();
   else if (tab === 'restore') renderRestore();
-  else if (tab === 'tools') renderRuns();
+  else if (tab === 'tools') { renderRuns(); renderObsidian(); }
+  else if (tab === 'apps') renderApps();
 }
 
 // ---------- the settings form ----------
@@ -71,6 +166,12 @@ async function renderForm() {
   $('verifyRead').checked = s.verifyRead;
   $('rawMarkup').checked = s.rawMarkup;
   $('phoneMedia').checked = s.phoneMedia;
+  $('obsidian').checked = s.obsidian;
+  for (const id of ['skipCodes', 'skipPromos', 'skipAutomated']) $(id).checked = s[id];
+  // The Backups tab starts in this order; its own menu changes it while you look.
+  if ($('chatSort').value !== s.chatSort || !renderForm.done) $('indexSort').value = s.chatSort === 'auto' ? 'name' : s.chatSort;
+  $('chatSort').value = s.chatSort;
+  renderForm.done = true;
 }
 function settingsMode(advanced) {
   $('modeBasic').setAttribute('aria-pressed', String(!advanced));
@@ -112,10 +213,12 @@ document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.id === 'theme') {
     // handled by its own listener
-  } else if (['notify', 'verifyRead', 'fullSizeEarly', 'rawMarkup', 'includeMedia', 'phoneMedia'].includes(t.id)) {
+  } else if (['notify', 'verifyRead', 'fullSizeEarly', 'rawMarkup', 'includeMedia', 'phoneMedia', 'obsidian', 'skipCodes', 'skipPromos', 'skipAutomated'].includes(t.id)) {
     await saveSettings({ [t.id]: t.checked });
     if (t.id === 'includeMedia') $('photoQuality').disabled = !t.checked;
     toast('Saved.');
+    // Kept up to date from now on: written in full once, here, where it's quickest.
+    if (t.id === 'obsidian' && t.checked) writeObsidian();
   } else if (t.id === 'photoQuality') {
     await saveSettings({ fullSize: t.value === 'full' });
     toast('Saved.');
@@ -125,6 +228,10 @@ document.addEventListener('change', async (e) => {
     toast('Saved.');
   } else if (t.id === 'compactCorner') {
     await saveSettings({ compactCorner: t.value });
+    toast('Saved.');
+  } else if (t.id === 'chatSort') {
+    await saveSettings({ chatSort: t.value });
+    $('indexSort').value = t.value === 'auto' ? 'name' : t.value;
     toast('Saved.');
   } else if (t.id === 'patience') {
     await saveSettings({ patience: +t.value });
@@ -187,6 +294,7 @@ async function chooseFolder() {
   await saveSettings({ folderName: dir.name });
   toast(`Backups will be saved in “${dir.name}”.`);
   libCache = null;
+  archiveStale = true;
   renderFolder();
   renderTotal();
   refreshTab();
@@ -211,8 +319,8 @@ $('chooseFolder').onclick = chooseFolder;
 $('welcomeChoose').onclick = chooseFolder;
 $('welcomeMessages').onclick = () => chrome.runtime.sendMessage({ type: 'gm-open-messages' });
 $('welcomeAll').onclick = () => $('totalRun').click();
-$('welcomePhone').onclick = () => { showTab('tools'); $('importPhone').click(); };
-$('openBackup').onclick = () => chrome.runtime.sendMessage({ type: 'gm-open-backup' });
+$('welcomePhone').onclick = () => { showTab('tools'); importAnything(false); };
+$('openBackup').onclick = () => openArchive();
 $('homeHealth').onclick = () => showTab('backups');
 
 // The backup's summary (data.js and backup-state.json), read once and shared
@@ -230,12 +338,22 @@ async function getLib(force = false) {
       if ((await dir.queryPermission({ mode: 'readwrite' })) !== 'granted') return { dir, needsAccess: true };
       let lib = null;
       try { lib = await libraryRows(dir); } catch { /* unreadable: treated as empty */ }
+      // Which ID is each app's main account (shown once an app has a second).
+      try { mainAccounts = (await readAccounts({ readText: (p) => textAt(dir, p) })).main; } catch { mainAccounts = {}; }
       if (!lib) return { dir, rows: [], empty: true };
       // A chat whose folder was deleted by hand (in Finder, say) is still listed
       // until it's deleted here too.
       const conv = await dir.getDirectoryHandle('conversations').catch(() => null);
+      // Other apps' and other accounts' chats are a level down, in
+      // conversations/<App>/ or conversations/<App> (<account>)/: any folder
+      // there that isn't a chat itself holds chats.
       const present = new Set();
-      if (conv) for await (const [name, h] of conv.entries()) if (h.kind === 'directory') present.add(`conversations/${name}`);
+      if (conv) for await (const [name, h] of conv.entries()) {
+        if (h.kind !== 'directory') continue;
+        present.add(`conversations/${name}`);
+        const isChat = await h.getFileHandle('messages.json').then(() => true, () => false);
+        if (!isChat) for await (const [n2, h2] of h.entries()) if (h2.kind === 'directory') present.add(`conversations/${name}/${n2}`);
+      }
       for (const r of lib.rows) r.folderGone = !present.has(r.folder);
       return { dir, ...lib };
     })();
@@ -252,9 +370,9 @@ async function renderHome() {
   const box = $('homeStatus');
   const lib = await getLib();
   for (const id of ['openBackup', 'totalRun', 'homeHealth']) $(id).disabled = !!lib.noFolder;
-  if (lib.noFolder) { box.innerHTML = '<span class="big">Not set up yet</span><div class="secondary">Follow the three steps above to make your first backup.</div>'; return; }
+  if (lib.noFolder) { box.innerHTML = '<span class="big">Not set up yet</span><div class="secondary">Follow the steps above to make your first backup.</div>'; return; }
   if (lib.needsAccess) { box.innerHTML = accessHtml(lib.dir); return; }
-  if (!lib.rows.length) { box.innerHTML = '<span class="big">Nothing backed up yet</span><div class="secondary">Click “Back up everything” below, or open a chat in Google Messages, click the 💬 icon at the top right of Chrome and choose “Back up this chat”.</div>'; return; }
+  if (!lib.rows.length) { box.innerHTML = `<span class="big">Nothing backed up yet</span><div class="secondary">${APP ? 'Bring in a phone backup or another app’s chats (Tools → Bring in files…), or back up from Google Messages with the extension.' : 'Click “Back up everything” below, or open a chat in Google Messages, click the 💬 icon at the top right of Chrome and choose “Back up this chat”.'}</div>`; return; }
   const { dir } = lib;
   const v = GMLib.verificationOf(lib.rows, lib.state, '').summary;
   homeTodo = lib.rows.filter((r) => r.id && (r.status === 'incomplete' || r.status === 'problem'));
@@ -265,10 +383,10 @@ async function renderHome() {
   const missing = cov ? cov.not_backed_up : 0;
   setBadge(homeTodo.length + lib.rows.filter((r) => r.folderGone).length);
   box.innerHTML = `<span class="big">${homeTodo.length || missing ? '⚠️' : '✅'} ${lib.rows.length.toLocaleString()} chat${lib.rows.length === 1 ? '' : 's'} backed up${homeTodo.length ? `, ${homeTodo.length.toLocaleString()} not finished` : ''}</span>
-    <div class="secondary">${messages.toLocaleString()} messages · last saved ${esc(when(Date.parse(lib.exp.updated_at)))} · in the folder “${esc(dir.name)}”</div>
-    ${homeTodo.length ? `<div style="margin-top:8px">${homeTodo.length === 1 ? `“${esc(homeTodo[0].title)}” isn’t` : `${homeTodo.length.toLocaleString()} chats aren’t`} completely saved yet. Nothing is lost: finishing carries on from where it stopped. <button id="homeFinish" class="tonal small">Finish ${homeTodo.length === 1 ? 'it' : 'them'} now</button></div>`
+    <div class="secondary">${messages.toLocaleString()} messages · last saved ${esc(when(Date.parse(lib.exp.updated_at)))} · in the folder “${esc(dir.name)}”</div>${appsLine(lib.rows)}
+    ${homeTodo.length ? `<div style="margin-top:8px">${homeTodo.length === 1 ? `“${esc(homeTodo[0].title)}” isn’t` : `${homeTodo.length.toLocaleString()} chats aren’t`} completely saved yet. Nothing is lost: finishing carries on from where it stopped. <button id="homeFinish" class="ext-only tonal small">Finish ${homeTodo.length === 1 ? 'it' : 'them'} now</button></div>`
       : '<div style="margin-top:8px">Every chat in your backup is complete.</div>'}
-    ${photosWaiting ? `<div style="margin-top:6px">${photosWaiting.toLocaleString()} photo${photosWaiting === 1 ? '' : 's'} in ${homePhotos.length === 1 ? `“${esc(homePhotos[0].title)}”` : `${homePhotos.length.toLocaleString()} chats`} ${photosWaiting === 1 ? 'is' : 'are'} listed but not fetched yet (from a speed run or a stopped backup). <button id="homePhotos" class="tonal small">Fetch them now</button></div>` : ''}
+    ${photosWaiting ? `<div style="margin-top:6px">${photosWaiting.toLocaleString()} photo${photosWaiting === 1 ? '' : 's'} in ${homePhotos.length === 1 ? `“${esc(homePhotos[0].title)}”` : `${homePhotos.length.toLocaleString()} chats`} ${photosWaiting === 1 ? 'is' : 'are'} listed but not fetched yet (from a speed run or a stopped backup). <button id="homePhotos" class="ext-only tonal small">Fetch them now</button></div>` : ''}
     ${cov ? `<div style="margin-top:4px">${missing ? `${missing.toLocaleString()} of the ${cov.in_messages.toLocaleString()} conversations in Google Messages aren’t backed up yet. “Back up everything” saves them.` : `All ${cov.in_messages.toLocaleString()} conversations in Google Messages were found in your backup (checked ${esc(when(Date.parse(cov.scanned_at)))}).`}</div>` : ''}`;
 }
 function setBadge(n) {
@@ -329,13 +447,15 @@ let pendingT = 0;
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   for (const k of ['settings', 'runs']) if (changes[k]) pending.add(k);
+  // What an app's web page reader keeps shows on the Apps tab as it comes in.
+  if (Object.keys(changes).some((k) => k.startsWith('webcap:'))) pending.add('webcap');
   if (!pending.size) return;
   clearTimeout(pendingT);
   pendingT = setTimeout(() => {
     const keys = new Set(pending);
     pending.clear();
     if (keys.has('settings')) renderForm();
-    if (keys.has('runs')) { libCache = null; renderTotal(); }
+    if (keys.has('runs')) { libCache = null; archiveStale = true; renderTotal(); }
     refreshTab();
   }, 300);
 });
@@ -438,10 +558,10 @@ async function renderIndex() {
   const cov = lib.exp ? GMLib.verificationOf(rows, lib.state, chrome.runtime.getManifest().version).full.coverage : null;
   health = {
     rows,
-    unfinished: indexItems.filter((x) => x.id && !x.id.startsWith('folder:') && isText(x.row) && (x.row?.status === 'incomplete' || (x.job && !x.row))).map((x) => x.row || { id: x.id, title: x.title }),
-    waiting: rows.filter((r) => r.id && isText(r) && mc(r).waiting),
-    thumbs: rows.filter((r) => r.id && isText(r) && mc(r).thumbnail),
-    failed: rows.filter((r) => r.id && isText(r) && (mc(r).failed || (mc(r).skipped && $('previewPics').checked))),
+    unfinished: indexItems.filter((x) => x.id && !x.id.startsWith('folder:') && isLive(x.row) && (x.row?.status === 'incomplete' || (x.job && !x.row))).map((x) => x.row || { id: x.id, title: x.title }),
+    waiting: rows.filter((r) => r.id && isLive(r) && mc(r).waiting),
+    thumbs: rows.filter((r) => r.id && isLive(r) && mc(r).thumbnail),
+    failed: rows.filter((r) => r.id && isLive(r) && (mc(r).failed || (mc(r).skipped && $('previewPics').checked))),
     missing: cov ? [...cov.not_backed_up, ...cov.unfinished.filter((u) => !rows.some((r) => r.id === u.id))] : [],
   };
   // Fix-everything buttons, only for what applies.
@@ -458,19 +578,25 @@ async function renderIndex() {
 
 function drawIndex() {
   const q = $('indexFind').value.trim().toLowerCase();
-  // A filter per app, once there's more than one in the library.
-  const apps = [...new Set(indexItems.map((x) => GMLib.serviceOf(x.row)))];
-  const filters = apps.length > 1 ? [...FILTERS, ...apps.map((a) => [`app:${a}`, GMLib.serviceLabel(a), (x) => GMLib.serviceOf(x.row) === a])] : FILTERS;
+  // A filter per source (an app, or a second account in one), once there's more than one.
+  noteAccounts(indexItems.map((x) => x.row).filter(Boolean));
+  const sources = new Map(indexItems.map((x) => [sourceKey(x.row), sourceName(x.row)]));
+  const filters = sources.size > 1 ? [...FILTERS, ...[...sources].map(([k, label]) => [`app:${k}`, label, (x) => sourceKey(x.row) === k])] : FILTERS;
   const counts = filters.map(([id, , f]) => indexItems.filter(f).length);
   $('indexFilters').innerHTML = filters.map(([id, label], i) => (i === 0 || counts[i] ? `<button data-filter="${id}" aria-pressed="${indexFilter === id}">${label}<span class="n">${counts[i].toLocaleString()}</span></button>` : '')).join('');
   const f = (filters.find(([id]) => id === indexFilter) || FILTERS[0])[2];
-  // As every list of chats: favourites, then names A–Z, then numbers.
-  const order = GMLib.chatOrder((x) => !!x.row && GMLib.isFavourite(x.row));
+  // Favourites, then names A–Z, then numbers (as every list of chats), or by
+  // the latest message or the most messages (Settings → Order of chats and people).
+  const sort = $('indexSort').value;
+  const byName = GMLib.chatOrder((x) => !!x.row && GMLib.isFavourite(x.row));
+  const order = sort === 'recent' ? (a, b) => String(b.row?.last || '').localeCompare(String(a.row?.last || '')) || byName(a, b)
+    : sort === 'count' ? (a, b) => (b.row?.count || 0) - (a.row?.count || 0) || byName(a, b)
+    : byName;
   const list = indexItems.filter((x) => f(x) && (!q || (x.title || '').toLowerCase().includes(q) || GMLib.formatNumber(x.title).toLowerCase().includes(q)))
     .sort((a, b) => order({ ...a, title: a.title || '' }, { ...b, title: b.title || '' }));
   const total = indexItems.reduce((n, x) => n + (x.row?.count || 0), 0);
   $('indexMsg').textContent = indexItems.length ? `${indexItems.length.toLocaleString()} chat${indexItems.length === 1 ? '' : 's'}, ${total.toLocaleString()} messages${list.length !== indexItems.length ? ` · showing ${list.length.toLocaleString()}` : ''}` : '';
-  if (!indexItems.length) { $('index').innerHTML = '<div class="empty">Nothing backed up yet, and no chats on the automatic list. Use “Add chats…”, or back up a chat from the 💬 popup.</div>'; return; }
+  if (!indexItems.length) { $('index').innerHTML = `<div class="empty">${APP ? 'Nothing here yet. Bring in a phone backup or another app’s chats (Tools), or back up from Google Messages with the extension.' : 'Nothing backed up yet, and no chats on the automatic list. Use “Add chats…”, or back up a chat from the 💬 popup.'}</div>`; return; }
   const everyOpts = (j) => `<option value="off"${!j || j.enabled === false ? ' selected' : ''}>Off</option>${Object.entries(EVERY).map(([h, l]) => `<option value="${h}"${j && j.enabled !== false && +h === j.everyHours ? ' selected' : ''}>${l}</option>`).join('')}`;
   const rowHtml = (x, i) => {
     const r = x.row;
@@ -478,7 +604,7 @@ function drawIndex() {
     const status = r?.folderGone ? '<span class="st bad">Folder missing</span><div class="secondary">Its files were deleted outside the extension. Use ⋯ → Delete to take it off the list.</div>'
       : r ? `${statusPill(r.status, (r.problems || []).join(', '))}${r.problems?.length ? `<div class="secondary">${esc(r.problems.join(', '))}</div>` : ''}`
       : `<span class="st warn">Not backed up yet</span>${x.job?.lastResult ? `<div class="secondary">${esc(x.job.lastResult.slice(0, 80))}</div>` : ''}`;
-    const canRun = x.id && !x.id.startsWith('folder:') && isText(r);
+    const canRun = !APP && x.id && !x.id.startsWith('folder:') && isLive(r);
     const menu = [
       canRun && (c.waiting || c.failed) && `<button data-act="fetch">Fetch ${(c.waiting + c.failed).toLocaleString()} photos</button>`,
       canRun && c.thumbnail && `<button data-act="upgrade">Upgrade ${c.thumbnail.toLocaleString()} to full size</button>`,
@@ -486,19 +612,20 @@ function drawIndex() {
       r && `<button data-act="delete" class="danger-text" data-delete="${esc(r.folder)}">Delete from backup…</button>`,
     ].filter(Boolean).join('');
     return `<tr class="chat-row" data-i="${i}" data-id="${esc(x.id)}">
-      <td class="c-chat"><b>${x.title ? esc(GMLib.formatNumber(x.title)) : '<i class="gray">Unnamed chat</i>'}</b>${appBadge(r)}${r?.pinned ? ' <span title="Pinned in Google Messages">📌</span>' : r && GMLib.isFavourite(r) ? ' <span title="A starred contact on the phone">⭐</span>' : ''}${r ? `<div class="secondary">${(r.count || 0).toLocaleString()} message${r.count === 1 ? '' : 's'} · ${esc((r.first || '?').slice(0, 10))} – ${esc((r.last || '?').slice(0, 10))}${r.contact?.people?.some((p) => p.num) ? '' : ' · no phone number yet'}</div>` : ''}</td>
+      <td class="c-chat"><b>${x.title ? esc(GMLib.formatNumber(x.title)) : '<i class="gray">Unnamed chat</i>'}</b>${appBadge(r)}${r?.pinned ? ' <span title="Pinned in Google Messages">📌</span>' : r && GMLib.isFavourite(r) ? ' <span title="A starred contact on the phone">⭐</span>' : ''}${r ? `<div class="secondary">${(r.count || 0).toLocaleString()} message${r.count === 1 ? '' : 's'} · ${esc((r.first || '?').slice(0, 10))} – ${esc((r.last || '?').slice(0, 10))}${!isText(r) || r.contact?.people?.some((p) => p.num) ? '' : ' · no phone number yet'}</div>` : ''}</td>
       <td>${status}</td>
       <td class="media-cell">${r ? mediaCell(c) : '—'}</td>
-      <td>${canRun ? `<select class="every" data-id="${esc(x.id)}" title="Back up by itself">${everyOpts(x.job)}</select>` : ''}</td>
+      <td class="ext-only">${canRun ? `<select class="every" data-id="${esc(x.id)}" title="Back up by itself">${everyOpts(x.job)}</select>` : ''}</td>
       <td class="actions">${canRun ? `<button class="runNow tonal small" title="${r?.status === 'incomplete' || !r ? 'Carry on backing up this chat' : 'Back up this chat now'}">${r?.status === 'incomplete' || !r ? 'Continue' : 'Back up'}</button>` : ''}${menu ? `<details class="row-menu"><summary title="More" aria-label="More">⋯</summary><div class="menu">${menu}</div></details>` : ''}</td></tr>`;
   };
   const shown = list.slice(0, indexShown);
-  $('index').innerHTML = `<table><thead><tr><th>Chat</th><th>Status</th><th class="media-cell">Photos and videos</th><th>By itself</th><th></th></tr></thead><tbody>
+  $('index').innerHTML = `<table><thead><tr><th>Chat</th><th>Status</th><th class="media-cell">Photos and videos</th><th class="ext-only">By itself</th><th></th></tr></thead><tbody>
     ${shown.map((x) => rowHtml(x, indexItems.indexOf(x))).join('')}</tbody></table>
     ${list.length > shown.length ? `<button class="more-rows tonal" id="indexMore">Show ${Math.min(150, list.length - shown.length).toLocaleString()} more (${(list.length - shown.length).toLocaleString()} left)</button>` : ''}
     ${shown.length ? '' : '<div class="empty">No chats match.</div>'}`;
 }
 $('indexFind').addEventListener('input', () => { indexShown = 150; drawIndex(); });
+$('indexSort').addEventListener('change', () => { indexShown = 150; drawIndex(); });
 $('indexFilters').addEventListener('click', (e) => { const b = e.target.closest('[data-filter]'); if (!b) return; indexFilter = b.dataset.filter; indexShown = 150; drawIndex(); });
 $('indexRefresh').onclick = async () => { $('index').innerHTML = '<div class="skeleton w80"></div><div class="skeleton w60"></div><div class="skeleton w80"></div>'; await getLib(true); renderIndex(); };
 
@@ -530,7 +657,7 @@ $('index').addEventListener('click', async (e) => {
     e.target.closest('details')?.removeAttribute('open');
     if (act === 'fetch') runPhotos([x.row], 'fetch', !!mc(x.row).failed);
     if (act === 'upgrade') runPhotos([x.row], 'fullsize', false);
-    if (act === 'open') chrome.runtime.sendMessage({ type: 'gm-open-backup', hash: `chat-id/${encodeURIComponent(x.row.id || '')}` });
+    if (act === 'open') openArchive(`chat-id/${encodeURIComponent(x.row.id || '')}`);
     return; // delete is handled by the [data-delete] listener
   }
   if (e.target.classList.contains('runNow')) {
@@ -727,25 +854,42 @@ function* restoreItems(data, row, withMedia) {
 }
 
 // The Phone restore tab: what would go into the file, and what can't.
+// The text chats a restore file is made of: Google Messages', of the number chosen.
+const restoreRows = (lib) => {
+  const pick = $('restoreAccountRow').hidden ? '' : $('restoreAccount').value;
+  return lib.rows.filter((r) => isText(r) && GMLib.accountKey(r.account) === pick);
+};
 async function renderRestore() {
   const lib = await getLib();
   const box = $('restoreReady');
   $('exportPhone').disabled = $('exportPackage').disabled = !!(lib.noFolder || lib.needsAccess || !lib.rows?.length);
   if (lib.noFolder) { box.innerHTML = '<div class="empty">Choose a backup folder first: Settings → Backup folder.</div>'; $('restoreLeft').innerHTML = ''; return; }
   if (lib.needsAccess) { box.innerHTML = `<div class="home-status">${accessHtml(lib.dir)}</div>`; $('restoreLeft').innerHTML = ''; return; }
-  // Only text chats go back on a phone as texts; other apps' chats stay in the archive.
-  const rows = lib.rows.filter((r) => GMLib.serviceOf(r) === 'sms');
+  // Only text chats go back on a phone as texts; other apps' chats stay in the
+  // archive. With texts from more than one number, one number at a time.
+  noteAccounts(lib.rows);
+  const accounts = new Map(lib.rows.filter(isText).map((r) => [GMLib.accountKey(r.account), r.account ? sourceName(r) : `${sourceName(r)} (main)`]));
+  $('restoreAccountRow').hidden = accounts.size < 2;
+  if (accounts.size > 1) {
+    const keep = $('restoreAccount').value;
+    $('restoreAccount').innerHTML = [...accounts].map(([k, label]) => `<option value="${esc(k)}"${k === keep ? ' selected' : ''}>${esc(label)}</option>`).join('');
+  }
+  const rows = restoreRows(lib);
   const ready = rows.filter((r) => restoreAddrs(r.contact?.people, r.title).length);
   const left = rows.filter((r) => !ready.includes(r));
   const msgs = ready.reduce((n, r) => n + (r.count || 0), 0);
+  const others = lib.rows.filter((r) => !isText(r)).length;
   const pics = ready.reduce((n, r) => { const c = mc(r); return n + c.full + c.same + c.thumbnail + c.original; }, 0);
   const tile = (n, label, warn) => `<div class="tile${warn ? ' warn' : ''}"><b>${n.toLocaleString()}</b>${label}</div>`;
   box.innerHTML = tile(ready.length, `of ${rows.length.toLocaleString()} chats ready`) + tile(msgs, 'messages') + tile(pics, 'photos and videos') + (left.length ? tile(left.length, 'chats without a phone number', true) : '');
   const canRefresh = left.filter((r) => r.id);
   $('restoreLeft').innerHTML = left.length ? `<div class="fixbar"><span>These have no phone number yet, so they’d be left out: ${left.slice(0, 6).map((r) => ({ ...r, title: GMLib.formatNumber(r.title) })).map((r) => `“${esc(r.title)}”`).join(', ')}${left.length > 6 ? ` and ${(left.length - 6).toLocaleString()} more` : ''}. Backing a chat up again saves its contact card, with the numbers.</span>${canRefresh.length ? `<button class="tonal small" id="restoreRefresh">Back ${canRefresh.length === 1 ? 'it' : 'them'} up again</button>` : ''}</div>` : '';
   restoreLeftRows = canRefresh;
+  // Other apps' chats stay in the archive: a phone can only take texts back.
+  if (others) $('restoreLeft').insertAdjacentHTML('beforeend', `<div class="secondary" style="margin-top:6px">${others.toLocaleString()} chat${others === 1 ? '' : 's'} from other apps (${esc([...new Set(lib.rows.filter((r) => !isText(r)).map((r) => GMLib.serviceLabel(GMLib.serviceOf(r))))].join(', '))}) ${others === 1 ? 'stays' : 'stay'} in your archive: a phone can only take texts back.</div>`);
 }
 let restoreLeftRows = [];
+$('restoreAccount').onchange = () => renderRestore();
 document.addEventListener('click', (e) => { if (e.target.id === 'restoreRefresh') runChats(restoreLeftRows, false); });
 
 // A file's bytes as base64, written a slice at a time (each slice a multiple
@@ -789,7 +933,7 @@ $('exportPhone').onclick = async () => {
     let count = 0;
     let pics = 0;
     const left = [];
-    const textRows = lib.rows.filter((r) => GMLib.serviceOf(r) === 'sms');
+    const textRows = restoreRows(lib);
     for (const [i, row] of textRows.entries()) {
       note(`Writing ${i + 1} of ${textRows.length}: ${row.title} (${count.toLocaleString()} messages so far)…`);
       const data = await jsonAt(dir, `${row.folder}/messages.json`);
@@ -872,7 +1016,7 @@ $('exportPackage').onclick = async () => {
     const counts = { threads: 0, messages: 0, sms: 0, mms: 0, media: 0, media_bytes: 0 };
     const left = [];
     let mediaN = 0;
-    const textRows = lib.rows.filter((r) => GMLib.serviceOf(r) === 'sms');
+    const textRows = restoreRows(lib);
     for (const [i, row] of textRows.entries()) {
       note(`Packing ${i + 1} of ${textRows.length}: ${row.title} (${counts.messages.toLocaleString()} messages so far)…`);
       const data = await jsonAt(dir, `${row.folder}/messages.json`);
@@ -982,10 +1126,14 @@ async function askDelete(folder, canAsk = true) {
     try { let d = dir; for (const p of row.folder.split('/')) d = await d.getDirectoryHandle(p); } catch { gone = true; }
     deleting = { dir, lib, row, gone };
     $('delTitle').textContent = `Delete “${row.title}” from your backup?`;
+    const where = isText(row) ? 'Google Messages or your phone' : `${GMLib.serviceLabel(GMLib.serviceOf(row))} or its export`;
+    noteAccounts((await getLib()).rows);
     $('delText').textContent = gone
-      ? `Its folder (${row.folder}) is already gone from your backup folder, so this just takes the chat off your backup’s list, index and checksums. It doesn’t touch Google Messages or your phone.`
-      : `This takes the chat out of your backup: ${(row.count || 0).toLocaleString()} messages and ${(row.media_saved || 0).toLocaleString()} photos and videos. It doesn’t touch Google Messages or your phone. The files are moved into a folder called “removed-chats” inside your backup folder, so you can still get them back until you delete that folder.`;
-    $('delExclude').checked = true;
+      ? `Its folder (${row.folder}) is already gone from your backup folder, so this just takes the chat off your backup’s list, index and checksums. It doesn’t touch ${where}.`
+      : `This takes the chat out of your backup: ${(row.count || 0).toLocaleString()} messages and ${(row.media_saved || 0).toLocaleString()} photos and videos. It doesn’t touch ${where}. The files are moved into a folder called “removed-chats” inside your backup folder, so you can still get them back until you delete that folder.`;
+    // "Don't back it up again" is about Google Messages: text chats only.
+    $('delExclude').closest('.check').hidden = !isLive(row);
+    $('delExclude').checked = isLive(row);
     $('delMsg').textContent = '';
     $('delGo').disabled = false;
     $('deleteDlg').showModal();
@@ -1048,6 +1196,88 @@ if (location.hash.startsWith('#delete:')) {
   showTab('backups');
   askDelete(folder, false);
 }
+
+// ---------- leaving codes, promotions and automated texts out ----------
+// Settings → Leave out of your archive (skipCodes, skipPromos, skipAutomated;
+// GMLib.chatKind). "Back up everything" (content.js) and imports
+// (importChat) skip them; this finds the ones already in the archive and
+// moves them out as Delete does: into removed-chats/<date>/, and onto
+// backup-state.json's excluded list with the reason, so "Back up everything"
+// doesn't bring them back.
+let skippable = null;
+$('skipFind').onclick = async () => {
+  const msg = $('skipMsg');
+  $('skipFound').innerHTML = '';
+  skippable = null;
+  try {
+    const skip = GMLib.skipKinds(await getSettings());
+    if (!skip.size) { msg.textContent = 'Tick what to leave out first.'; return; }
+    const dir = await folderForReading();
+    const lib = await libraryRows(dir);
+    if (!lib?.rows.length) { msg.textContent = 'There’s nothing in your archive yet.'; return; }
+    const labels = await jsonAt(dir, 'labels.json');
+    const found = [];
+    for (const [i, row] of lib.rows.entries()) {
+      if (i % 20 === 0) msg.textContent = `Looking through your chats: ${i.toLocaleString()} of ${lib.rows.length.toLocaleString()}…`;
+      if (GMLib.senderOf(row) === 'group') continue;
+      // Traits missing (a row from before the index kept them) or counted by older
+      // rules: worked out from the chat itself (and kept on the row, so the index
+      // has them once it's next written).
+      const traits = GMLib.traitsCurrent(row.traits) ? row.traits : (row.traits = GMLib.chatTraits((await jsonAt(dir, `${row.folder}/messages.json`))?.messages));
+      const kind = GMLib.chatKindFor(row, labels, traits);
+      if (kind && skip.has(kind)) found.push({ row, kind });
+    }
+    if (!found.length) { msg.textContent = `None found: nothing in your archive is ${[...skip].map((k) => GMLib.CHAT_KINDS[k].toLowerCase()).join(' or ')}.`; return; }
+    skippable = { dir, lib, found };
+    const of = (k) => found.filter((f) => f.kind === k).length;
+    const messages = found.reduce((n, f) => n + (f.row.count || 0), 0);
+    msg.textContent = `Found ${found.length.toLocaleString()} chat${found.length === 1 ? '' : 's'} (${messages.toLocaleString()} messages): ${Object.keys(GMLib.CHAT_KINDS).filter(of).map((k) => `${GMLib.CHAT_KINDS[k].toLowerCase()} ${of(k).toLocaleString()}`).join(', ')}.`;
+    $('skipFound').innerHTML = `<details style="margin:6px 0"><summary class="secondary">Which chats</summary><ul class="secondary" style="margin:6px 0 0 18px;padding:0;max-height:240px;overflow:auto">${found.map((f) => `<li>${esc(GMLib.formatNumber(f.row.title))} · ${esc(GMLib.CHAT_KINDS[f.kind])} · ${(f.row.count || 0).toLocaleString()} message${f.row.count === 1 ? '' : 's'}</li>`).join('')}</ul></details>
+      <div class="row"><button id="skipGo" class="tonal small">Move them out of my archive</button><span class="secondary">They go into the removed-chats folder (delete that to remove them for good), and “Back up everything” leaves them out from now on.</span></div>`;
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+};
+document.addEventListener('click', async (e) => {
+  if (e.target.id !== 'skipGo' || !skippable) return;
+  const { dir, lib, found } = skippable;
+  const msg = $('skipMsg');
+  e.target.disabled = true;
+  try {
+    // A backup running now would put them back when it saves its index.
+    const ping = await chrome.runtime.sendMessage({ type: 'gm-to-tab', focus: false, message: { type: 'gm-ping' } }).catch(() => null);
+    if (ping?.running) { msg.textContent = 'A backup is running in the Google Messages tab. Stop it (or let it finish) first, then try again.'; e.target.disabled = false; return; }
+    const started = new Date();
+    const pad = (x) => String(x).padStart(2, '0');
+    const dest = `removed-chats/${started.getFullYear()}-${pad(started.getMonth() + 1)}-${pad(started.getDate())} ${pad(started.getHours())}.${pad(started.getMinutes())}`;
+    const removed = [];
+    for (const [i, { row }] of found.entries()) {
+      msg.textContent = `Moving ${(i + 1).toLocaleString()} of ${found.length.toLocaleString()}: ${GMLib.formatNumber(row.title)}…`;
+      try { removed.push(...(await moveTree(dir, row.folder, `${dest}/${row.folder.replace(/^conversations\//, '')}`))); } catch (err) { if (err.name !== 'NotFoundError') throw err; }
+    }
+    const io = libraryIO(dir);
+    const gone = new Set(found.map((f) => f.row));
+    const ids = new Set(found.map((f) => f.row.id).filter(Boolean));
+    const state = lib.state || {};
+    state.excluded = [...(state.excluded || []).filter((x) => !ids.has(x.id)), ...found.filter((f) => f.row.id).map((f) => ({ id: f.row.id, title: f.row.title, at: started.toISOString(), reason: f.kind }))];
+    await io.write('backup-state.json', JSON.stringify(state, null, 2));
+    const s = await getSettings();
+    await saveSettings({ schedules: s.schedules.filter((j) => !ids.has(j.id)) });
+    const kinds = [...new Set(found.map((f) => GMLib.CHAT_KINDS[f.kind].toLowerCase()))].join(', ');
+    const summary = `Moved ${found.length.toLocaleString()} chat${found.length === 1 ? '' : 's'} of ${kinds} out of the archive (${removed.length.toLocaleString()} files, into “${dest}”).`;
+    msg.textContent = 'Updating the archive’s index and checksums…';
+    await finishLibraryRun(io, lib.rows.filter((r) => !gone.has(r)), lib.exp, { kind: 'leave out', started_at: started.toISOString(), chats: found.map((f) => f.row.title), moved_to: dest, files: removed.length },
+      [`[${started.toISOString()}] ${summary}`, ...found.map((f) => `– ${f.row.title}: ${GMLib.CHAT_KINDS[f.kind].toLowerCase()}`)], summary, { target: kinds, removed });
+    msg.textContent = summary;
+    $('skipFound').innerHTML = '';
+    skippable = null;
+    libCache = null;
+    refreshTab();
+  } catch (err) {
+    msg.textContent = `Couldn’t finish: ${err.message.replace(/\.+$/, '')}. Anything already moved is in the removed-chats folder; find them again to carry on.`;
+    e.target.disabled = false;
+  }
+});
 
 // ---------- duplicate photos ----------
 // Earlier versions sometimes saved a picture twice in one message: a GIF and
@@ -1262,6 +1492,7 @@ async function findExports(dir, note) {
 function libraryIO(dir) {
   const hashes = new Map();
   return {
+    dir,
     hashes,
     readText: (p) => textAt(dir, p),
     exists: async (p) => { try { await fileAt(dir, p); return true; } catch { return false; } },
@@ -1274,21 +1505,163 @@ function libraryIO(dir) {
       await w.write(data);
       await w.close();
     },
+    async remove(path) {
+      const parts = path.split('/');
+      let d = dir;
+      for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p);
+      await d.removeEntry(parts[parts.length - 1]).catch((e) => { if (e.name !== 'NotFoundError') throw e; });
+    },
   };
 }
+
+// ---------- Obsidian ----------
+// The archive as Obsidian notes (obsidian.js), in Obsidian/ in the backup
+// folder: written here on request, and after every backup and import when
+// "Keep them up to date" is on. Notes aren't part of the checksums.
+async function updateObsidian(dir, rows, onProgress) {
+  return GMObsidian.update(libraryIO(dir), { rows, saved: await jsonAt(dir, 'people.json'), labels: await jsonAt(dir, 'labels.json'), book: await jsonAt(dir, 'contacts.json'), onProgress });
+}
+async function renderObsidian(say = true) {
+  try {
+    const st = await GMObsidian.status(libraryIO(await folderForReading(false)));
+    $('obsidianWrite').textContent = st ? 'Update the notes' : 'Write the notes';
+    $('obsidianDelete').hidden = !st;
+    if (st && say && !$('obsidianWrite').disabled) $('obsidianMsg').textContent = `${st.notes.toLocaleString()} notes, last written ${when(Date.parse(st.updated_at))}.`;
+  } catch { /* no folder, or no access yet: nothing to say */ }
+}
+async function writeObsidian() {
+  const btn = $('obsidianWrite');
+  const msg = $('obsidianMsg');
+  btn.disabled = true;
+  try {
+    const dir = await folderForReading();
+    const lib = await libraryRows(dir);
+    if (!lib?.rows.length) throw new Error('There’s nothing in your backup yet.');
+    msg.textContent = 'Reading your backup…';
+    const r = await updateObsidian(dir, lib.rows, (n, total) => { msg.textContent = `Writing notes: ${n.toLocaleString()} of ${total.toLocaleString()} chats…`; });
+    msg.innerHTML = `${r.written ? `Wrote ${r.written.toLocaleString()} notes` : 'Every note was already up to date'} (${r.notes.toLocaleString()} in all, for ${r.people.toLocaleString()} people${r.topics ? `, ${r.topics.toLocaleString()} topics` : ''}${r.events ? ` and ${r.events.toLocaleString()} events` : ''})${r.removed ? `; removed ${r.removed.toLocaleString()} no longer needed` : ''}${r.kept ? `; left ${r.kept.toLocaleString()} you’ve written in as they are` : ''}. In Obsidian: <b>Open folder as vault</b>, then pick “${esc(dir.name)}”.${r.suggestions ? ` ${r.suggestions.toLocaleString()} people may be the same as someone else: see People in <a href="#" id="obsidianPeople">your backup</a>.` : ''}`;
+  } catch (e) {
+    msg.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+    renderObsidian(false);
+  }
+}
+$('obsidianWrite').onclick = () => writeObsidian();
+
+// Deleting the notes: the whole Obsidian folder, for good, in two steps.
+// First what goes (counting the notes the owner wrote in, and files of their
+// own in the folder), then a last, plainer warning. Not moved anywhere:
+// they're derived, so "Write the notes" makes them again, but not the
+// owner's own writing.
+let obsDeleting = null;
+async function obsidianFiles(dir) {
+  const files = [];
+  async function walk(d, at) {
+    for await (const [name, h] of d.entries()) {
+      if (h.kind === 'directory') await walk(h, `${at}/${name}`);
+      else files.push(`${at}/${name}`);
+    }
+  }
+  await walk(await dir.getDirectoryHandle(GMObsidian.ROOT), GMObsidian.ROOT);
+  return files;
+}
+$('obsidianDelete').onclick = async () => {
+  const say = (t) => { $('obsDlgMsg').textContent = t; };
+  $('obsDlgTitle').textContent = 'Delete your Obsidian notes?';
+  $('obsDlgText').textContent = 'Looking at what’s in the Obsidian folder…';
+  $('obsNext').hidden = false;
+  $('obsNext').disabled = true;
+  $('obsGo').hidden = true;
+  say('');
+  $('obsidianDlg').showModal();
+  try {
+    const dir = await folderForReading();
+    const io = libraryIO(dir);
+    const ours = new Set(Object.keys(JSON.parse((await io.readText(GMObsidian.MANIFEST)) || '{}').files || {}));
+    const files = await obsidianFiles(dir);
+    const extra = files.filter((p) => !ours.has(p) && p !== GMObsidian.MANIFEST).length;
+    let yours = 0;
+    const check = files.filter((p) => ours.has(p) && GMObsidian.ownable(p));
+    for (const [i, p] of check.entries()) {
+      if (i % 200 === 0) say(`Checking for notes you’ve written in: ${i.toLocaleString()} of ${check.length.toLocaleString()}…`);
+      if (GMObsidian.hasYours(await io.readText(p))) yours++;
+    }
+    say('');
+    obsDeleting = { dir };
+    const n = (x, one, many) => `${x.toLocaleString()} ${x === 1 ? one : many}`;
+    $('obsDlgText').innerHTML = `This deletes the whole <b>Obsidian</b> folder in “${esc(dir.name)}”: ${n(files.length, 'file', 'files')}${yours ? `, including <b>${n(yours, 'note you’ve written in', 'notes you’ve written in')}</b>` : ''}${extra ? ` and <b>${n(extra, 'file of your own', 'files of your own')}</b> you put there` : ''}. They aren’t moved anywhere, so it can’t be undone.<br><br>Your messages, photos and the rest of your backup aren’t touched. To have the notes again you’ll need to write them again (<b>Write the notes</b>), which takes a while on a big archive${yours || extra ? ', and what you wrote yourself won’t come back' : ''}. “Keep them up to date” is turned off, so a backup doesn’t write them again by itself.<span class="app-only"> The extension’s Settings has its own switch: turn it off there too, or its next backup writes them again.</span>`;
+    $('obsNext').disabled = false;
+    $('obsNext').focus();
+  } catch (e) {
+    $('obsDlgText').textContent = e.name === 'NotFoundError' ? 'There’s no Obsidian folder in your backup folder: nothing to delete.' : `Couldn’t look at the notes: ${e.message}`;
+    if (e.name === 'NotFoundError') renderObsidian(false);
+  }
+};
+$('obsNext').onclick = () => {
+  $('obsDlgTitle').textContent = 'Delete them for good?';
+  $('obsDlgText').innerHTML = 'This is the last step. <b>The Obsidian folder and everything in it will be deleted and can’t be recovered.</b> You’ll need to write the notes again to have them back.';
+  $('obsNext').hidden = true;
+  $('obsGo').hidden = false;
+  $('obsGo').disabled = false;
+  $('obsCancel').focus();
+};
+$('obsCancel').onclick = () => { obsDeleting = null; $('obsidianDlg').close(); };
+$('obsGo').onclick = async () => {
+  const { dir } = obsDeleting || {};
+  if (!dir) return;
+  $('obsGo').disabled = true;
+  $('obsDlgMsg').textContent = 'Deleting…';
+  try {
+    // A backup finishing now would write them again.
+    const ping = await chrome.runtime.sendMessage({ type: 'gm-to-tab', focus: false, message: { type: 'gm-ping' } }).catch(() => null);
+    if (ping?.running) { $('obsDlgMsg').textContent = 'A backup is running in the Google Messages tab. Let it finish (or stop it) first, then delete.'; $('obsGo').disabled = false; return; }
+    await saveSettings({ obsidian: false });
+    $('obsidian').checked = false;
+    await dir.removeEntry(GMObsidian.ROOT, { recursive: true }).catch((e) => { if (e.name !== 'NotFoundError') throw e; });
+    obsDeleting = null;
+    $('obsidianDlg').close();
+    $('obsidianMsg').textContent = 'The Obsidian notes were deleted. Write the notes to have them again.';
+    toast('Obsidian notes deleted.');
+  } catch (e) {
+    $('obsDlgMsg').textContent = `Couldn’t delete them: ${e.message.replace(/\.+$/, '')}. Some may be gone already; try again, or delete the Obsidian folder yourself.`;
+    $('obsGo').disabled = false;
+  } finally {
+    renderObsidian(false);
+  }
+};
+$('obsidianMsg').addEventListener('click', (e) => {
+  if (e.target.id !== 'obsidianPeople') return;
+  e.preventDefault();
+  openArchive('people/~matches');
+});
 
 // A phone backup from the Android app as an import source: its chats come
 // out as library chats (GMLib.phoneChat), and a chat's photos are read
 // straight from the package.
 async function phoneSource(file) {
   const pkg = await GMLib.readPackage(file);
-  const threads = new Map(pkg.manifest.threads.map((t) => [t.file.replace(/\.ndjson$/, ''), t]));
+  const threads = new Map(pkg.manifest.threads.map((t) => [t.file.replace(/\.ndjson(\.gz)?$/, ''), t]));
   const files = new Map(); // chat -> (photo name -> package entry)
+  const own = pkg.manifest.owner?.number;
   return {
     name: file.name,
     phone: true,
     manifest: pkg.manifest,
+    pkg, // the package itself: other apps' exports in it (sourcesFrom)
+    owner: own ? { id: own, label: GMLib.formatNumber(own) } : null,
     chats: [...threads.keys()],
+    // The phone's address book, when the app saved every contact (an empty
+    // one once that's turned off): { captured_at, contacts }.
+    async book() {
+      const a = pkg.manifest.address_book;
+      const b = a?.file && pkg.entry(a.file);
+      if (!b) return null;
+      try {
+        const j = JSON.parse(await new Response(b.stream().pipeThrough(new DecompressionStream('gzip'))).text());
+        return j?.format === 'gm-address-book' && Array.isArray(j.contacts) ? j : null;
+      } catch { return null; }
+    },
     thread: (chatPath) => threads.get(chatPath),
     async read(path) {
       const [, chatPath, rest] = path.match(/^(threads\/[^/]+)\/(.+)$/) || [];
@@ -1310,7 +1683,9 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
   // A chat only ever joins one from the same app: a WhatsApp chat with Alice
   // and the text chat with Alice stay two chats.
   const service = data.service || src.service || 'sms';
-  const same = rows.filter((r) => GMLib.serviceOf(r) === service);
+  // ...and of the same account: a second number's texts never join the first's.
+  const account = src.accountChoice || null; // null: the app's main account
+  const same = rows.filter((r) => GMLib.serviceOf(r) === service && GMLib.sameAccount(r.account, account?.id));
   const row = src.phone ? GMLib.phoneRowFor(same, src.thread(chatPath))
     : same.find((r) => r.id && data.conversation_id && r.id === data.conversation_id) || same.find((r) => (!r.id || !data.conversation_id) && r.title === title);
   const fromApp = service !== 'sms' && src.importer;
@@ -1322,10 +1697,21 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
     try { libData = JSON.parse((await io.readText(`${folder}/messages.json`)) || 'null'); } catch { /* start it again */ }
     try { progress = JSON.parse((await io.readText(`${folder}/progress.json`)) || 'null'); } catch { /* none */ }
   } else {
-    const base = GMLib.chatFolder(service, title);
+    const base = GMLib.chatFolder(service, title, account);
     for (let n = 1; ; n++) {
       folder = n === 1 ? base : `${base} (${n})`;
       if (!rows.some((r) => r.folder.toLowerCase() === folder.toLowerCase()) && !(await io.exists(`${folder}/messages.json`))) break;
+    }
+  }
+  // Left out (Settings): judged on everything the chat would hold, with the
+  // owner's labels on the chat it would join.
+  if (report.skip?.size) {
+    const probe = { id: row?.id || data.conversation_id, folder: row?.folder, title, service, group: data.group ?? row?.group, contact: data.contact || row?.contact };
+    const kind = GMLib.chatKindFor(probe, report.labels, GMLib.chatTraits([...(libData?.messages || []), ...(data.messages || [])]));
+    if (kind && report.skip.has(kind)) {
+      report.left[kind] = (report.left[kind] || 0) + 1;
+      log(`– ${title}: left out (${GMLib.CHAT_KINDS[kind].toLowerCase()})`);
+      return row || null;
     }
   }
   let saved = libData?.messages || [];
@@ -1389,7 +1775,8 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
     await io.write(`${folder}/contact.json`, JSON.stringify(contact, null, 2));
   } else if (contact && src.phone && data.contact?.people) {
     // The library's card, with what the phone adds: who's a favourite (starred
-    // in its contacts) and photos the card doesn't have.
+    // in its contacts), photos the card doesn't have, and the rest of the
+    // phone's contact (`card`).
     const theirs = new Map(data.contact.people.map((p) => [GMLib.phoneKey(p.number), p]));
     let changed = false;
     const people = [];
@@ -1397,6 +1784,8 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
       const o = theirs.get(GMLib.phoneKey(p.number));
       const q = { ...p };
       if (o?.favorite && !p.favorite) { q.favorite = true; changed = true; }
+      // The rest of the phone's contact, as the phone has it now.
+      if (o?.card && JSON.stringify(o.card) !== JSON.stringify(p.card)) { q.card = o.card; changed = true; }
       if (o?.photo && !p.photo) {
         const blob = await src.read(`${chatPath}/${o.photo}`);
         if (blob) { q.photo = o.photo; await io.write(`${folder}/${o.photo}`, blob); changed = true; }
@@ -1432,7 +1821,7 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
   const now = new Date().toISOString();
   const base = libData || data;
   const { range, ...rest } = base;
-  const out = { ...rest, ...(service !== 'sms' ? { service } : {}), conversation: base.conversation || title, conversation_id: base.conversation_id || data.conversation_id || null, exported_at: base.exported_at || now, updated_at: now,
+  const out = { ...rest, ...(service !== 'sms' ? { service } : {}), ...(account ? { account: account.id, account_label: account.label } : {}), conversation: base.conversation || title, conversation_id: base.conversation_id || data.conversation_id || null, exported_at: base.exported_at || now, updated_at: now,
     participants: [...new Set(merged.map((m) => m.sender))], message_count: merged.length, media_count: media.filter((x) => x.file).length, media_failed: media.filter((x) => !x.file).length, messages: merged, ...(contact ? { contact } : {}) };
   const dated = merged.filter((m) => m.timestamp);
   const prog = {
@@ -1475,15 +1864,27 @@ async function finishLibraryRun(io, rows, exp, run, lines, summary, { ok = true,
   await io.write('data.js', GMLib.indexScript({ exported_at: newInfo.created_at, updated_at: newInfo.updated_at, info: { ...newInfo, runs: newInfo.runs.map(({ log_file, ...r }) => r) }, conversations: rows, skipped: exp?.skipped || [], verification: ver.summary }));
   await io.write('export-info.json', JSON.stringify(newInfo, null, 2));
   await io.write('verification.json', JSON.stringify(ver.full, null, 2));
-  if (!(await io.exists('index.html'))) {
-    for (const [from, to] of [['viewer.html', 'index.html'], ['viewer.js', 'viewer.js'], ['theme.js', 'theme.js'], ['theme.css', 'theme.css']]) {
-      await io.write(to, await (await fetch(chrome.runtime.getURL(from))).text());
-    }
+  // Written once, or again if a file it runs on is missing (a viewer copied by
+  // a run from before library.js or modules/): every file viewer.html loads.
+  const fromExtension = async (f) => (await fetch(window.MA_APP?.archiveURL(f) || chrome.runtime.getURL(f))).text();
+  const viewerHtml = await fromExtension('viewer.html');
+  const viewerParts = GMLib.pageFiles(viewerHtml);
+  if (!(await io.exists('index.html')) || (await Promise.all(viewerParts.map((f) => io.exists(f)))).includes(false)) {
+    await io.write('index.html', viewerHtml);
+    for (const f of viewerParts) await io.write(f, await fromExtension(f));
     await io.write('README.txt', GMLib.README);
   }
   const parts = [];
   for (const r of rows) { const t = await io.readText(`${r.folder}/messages.csv`); if (t) parts.push(t); }
   await io.write('messages.csv', GMLib.joinCsv(parts));
+  if (settings.obsidian && io.dir) {
+    try {
+      const r = await updateObsidian(io.dir, rows);
+      lines.push(`[${new Date().toISOString()}] Obsidian notes: ${r.written} written, ${r.same} unchanged${r.removed ? `, ${r.removed} removed` : ''}`);
+    } catch (e) {
+      lines.push(`[${new Date().toISOString()}] Obsidian notes not updated: ${e.message}`);
+    }
+  }
   await io.write(run.log_file, `Message Archivist ${version} — ${run.kind}\nStarted:   ${run.started_at}\nFinished:  ${now.toISOString()}\n${run.source ? `From:      ${run.source}\n` : ''}\n${lines.join('\n')}\n`);
   const sums = GMLib.parseSums(await io.readText('SHA256SUMS.txt'));
   for (const p of removed) sums.delete(p);
@@ -1495,55 +1896,183 @@ async function finishLibraryRun(io, rows, exp, run, lines, summary, { ok = true,
   await chrome.storage.local.set({ runs: runs.slice(0, 30) });
 }
 
-async function importExports(pick) {
-  const note = (t) => { $('importMsg').textContent = t; };
+// ---------- bring in conversations ----------
+// One way in for everything: a phone backup from the Android app (.tar, and
+// its updates file, and the other apps' exports shared to it on the phone),
+// another app's export (its module in modules/, read by import.js), or an
+// export made by an earlier version of this extension (zip or folder). Each
+// picked file or folder is recognised by itself; all of them are merged in
+// one run.
+
+// What a picked file or folder is, as import sources (an earlier export can
+// be several, and so can a folder of other apps' exports, and a phone backup
+// with the exports shared to the Android app). Ones in it that looked like
+// exports but couldn't be read go in `problems`.
+async function sourcesFrom(picked, dir, ctx, note, problems = []) {
+  const fromApps = async () => {
+    const all = await GMImport.openAll(picked, ctx);
+    problems.push(...all.skipped);
+    return all.map((x) => x.source);
+  };
+  if (picked.kind === 'directory') {
+    if (await picked.isSameEntry(dir)) throw new Error('That’s the backup folder itself. Pick an export, or the folder it’s in.');
+    note(`Looking through ${picked.name}…`);
+    const found = await findExports(picked, note);
+    if (found.length) return found;
+    return fromApps();
+  }
+  if (/\.tar$/i.test(picked.name)) {
+    const phone = await phoneSource(picked);
+    // Other apps' exports shared to the Android app, which keeps them in the
+    // backup: each read by its app's module.
+    const apps = await GMImport.packageExports(phone.pkg, picked.name, ctx);
+    problems.push(...apps.skipped);
+    return [phone, ...apps.map((x) => x.source)];
+  }
+  if (/\.zip$/i.test(picked.name)) {
+    const found = zipExports(await GMZip.open(picked), picked.name);
+    if (found.length) return found;
+  }
+  return fromApps();
+}
+
+// accounts.json: which ID is each app's main account, once an import has said.
+async function readAccounts(io) {
+  try { const a = JSON.parse((await io.readText('accounts.json')) || 'null'); if (a?.main) return a; } catch { /* none yet */ }
+  return { version: 1, main: {} };
+}
+
+// Which account each source's chats go in (null: the app's main one, as
+// every chat before accounts). A source that doesn't say whose it is goes in
+// the main account. One that does: the main account if it's the main one's
+// ID, or if the app has no main ID yet and none of its chats are here (it
+// becomes the main); a separate account if it's another ID. If the app's
+// chats are here but its main ID isn't known, `ask` says whether they're the
+// same (in Settings, a question; without one, they're taken to be).
+async function resolveAccounts(sources, rows, accounts, ask) {
+  const decided = new Map();
+  for (const src of sources) {
+    if (src.accountChoice !== undefined) continue;
+    const service = src.phone ? 'sms' : (src.chat?.(src.chats[0])?.data.service || src.service || 'sms');
+    const o = src.owner;
+    if (!o?.id) { src.accountChoice = null; continue; }
+    const mine = { id: o.id, label: GMLib.accountLabel(o.id, o.label) };
+    const key = `${service}|${GMLib.accountKey(o.id)}`;
+    const main = accounts.main[service];
+    if (decided.has(key)) src.accountChoice = decided.get(key);
+    else if (main) src.accountChoice = GMLib.sameAccount(main.id, o.id) ? null : mine;
+    else if (!rows.some((r) => GMLib.serviceOf(r) === service && !r.account) || !ask || await ask(service, mine, src)) {
+      accounts.main[service] = mine;
+      accounts.changed = true;
+      src.accountChoice = null;
+    } else src.accountChoice = mine;
+    decided.set(key, src.accountChoice);
+  }
+}
+
+// The question, when an app's chats are already here and nothing says from which account.
+function askSameAccount(service, mine) {
+  const app = GMLib.serviceLabel(service);
+  return new Promise((resolve) => {
+    $('whoTitle').textContent = service === 'sms' ? `Texts from ${mine.label}` : `${app}: ${mine.label}`;
+    $('whoText').textContent = service === 'sms'
+      ? `This phone backup is from ${mine.label}. Your archive already has Google Messages texts. Are they from this same number? If not, these are kept apart as another number’s texts.`
+      : `This export is from ${mine.label}. Your archive already has ${app} chats. Are they from this same account? If not, these are kept apart as another account’s.`;
+    $('whoList').innerHTML = `<button class="filled" data-same="1" style="text-align:left">Yes, the same ${service === 'sms' ? 'number' : 'account'}</button><button class="outlined" data-same="0" style="text-align:left">No, keep them separate</button>`;
+    $('whoList').onclick = (e) => { const b = e.target.closest('[data-same]'); if (b) { $('whoDlg').close(); resolve(b.dataset.same === '1'); } };
+    $('whoSkip').textContent = 'Not sure: the same';
+    $('whoSkip').onclick = () => { $('whoDlg').close(); resolve(true); };
+    $('whoDlg').showModal();
+  });
+}
+
+// One line per source for the confirm.
+function describeSource(src, rows) {
+  const apart = src.accountChoice ? ` Kept apart as ${GMLib.serviceLabel(src.phone ? 'sms' : src.service)} · ${src.accountChoice.label}.` : '';
+  if (src.phone) {
+    const c = src.manifest.counts || {};
+    const matched = src.chats.filter((k) => GMLib.phoneRowFor(rows, src.thread(k))).length;
+    return `• “${src.name}”${src.manifest.updates_since ? ` (the updates file${src.manifest.updates_for ? ` for “${src.manifest.updates_for}”` : ''})` : ''}, a phone backup: ${(c.messages || 0).toLocaleString()} messages in ${src.chats.length.toLocaleString()} chats${c.media ? `, ${c.media.toLocaleString()} photos and videos` : ''}; ${matched.toLocaleString()} match chats already here by phone number.${apart}`;
+  }
+  if (src.importer) {
+    const svc = src.chat(src.chats[0])?.data.service || src.service;
+    return `• “${src.name}”, from ${GMLib.serviceLabel(svc)}: ${src.chats.length.toLocaleString()} chat${src.chats.length === 1 ? '' : 's'}, ${src.chats.reduce((n, k) => n + src.chat(k).data.messages.length, 0).toLocaleString()} messages.${apart}`;
+  }
+  return `• “${src.name}”, an earlier export: ${src.chats.length.toLocaleString()} chat${src.chats.length === 1 ? '' : 's'}.`;
+}
+
+// Where a bring-in says how it's going: under the button it was started from
+// (Tools, or the Apps tab).
+const importMsg = () => $(tab === 'apps' ? 'appsMsg' : 'importMsg');
+async function importAnything(pickFolder, given = null) {
+  const note = (t) => { importMsg().textContent = t; };
   const lines = [];
-  const log = (t) => lines.push(`[${new Date().toISOString()}] ${t}`);
-  let dir;
   try {
-    dir = await folderForReading();
-    let sources = [];
-    if (pick === 'phone') {
-      const [h] = await window.showOpenFilePicker({ id: 'gm-import-phone', types: [{ description: 'Phone backups from the Message Archivist app', accept: { 'application/x-tar': ['.tar'] } }] });
-      note('Reading the phone backup…');
-      const src = await phoneSource(await h.getFile());
-      const rows = (await getLib(true)).rows || [];
-      const matched = src.chats.filter((c) => GMLib.phoneRowFor(rows, src.thread(c))).length;
-      const c = src.manifest.counts || {};
-      if (!src.chats.length) { note('That phone backup has no chats in it.'); return; }
-      if (!confirm(`Bring the phone backup “${src.name}” into “${dir.name}”?\n\n${(c.messages || 0).toLocaleString()} messages in ${src.chats.length.toLocaleString()} chats${c.media ? `, with ${c.media.toLocaleString()} photos and videos` : ''}. ${matched.toLocaleString()} of the chats match chats already here by phone number; ${(src.chats.length - matched).toLocaleString()} would be new.\n\nOnly messages and photos that aren’t here yet are added. The backup file isn’t changed.`)) { note(''); return; }
-      await mergeExports(dir, [src], note, lines);
-      return;
+    const dir = await folderForReading();
+    const picked = given ? await Promise.all(given.map((h) => (h.getFile ? h.getFile() : h)))
+      : pickFolder ? [await window.showDirectoryPicker({ id: 'gm-import', mode: 'read' })]
+      : await Promise.all((await window.showOpenFilePicker({ id: 'gm-import', multiple: true })).map((h) => h.getFile()));
+    const ctx = { whoAmI, locale: navigator.language };
+    const sources = [];
+    const problems = [];
+    for (const p of picked) {
+      note(`Reading ${p.name}…`);
+      try { sources.push(...(await sourcesFrom(p, dir, ctx, note, problems))); } catch (e) { problems.push(`“${p.name}”: ${e.message}`); }
     }
-    if (pick === 'zip') {
-      const handles = await window.showOpenFilePicker({ id: 'gm-import', multiple: true, types: [{ description: 'Zip files', accept: { 'application/zip': ['.zip'] } }] });
-      for (const h of handles) sources.push(...zipExports(await GMZip.open(await h.getFile()), h.name));
-    } else {
-      const from = await window.showDirectoryPicker({ id: 'gm-import', mode: 'read' });
-      if (await from.isSameEntry(dir)) throw new Error('That’s the backup folder itself. Pick an earlier export, or the folder they’re in.');
-      note('Looking for exports…');
-      sources = await findExports(from, note);
-      for (const p of sources.problems || []) log(`! ${p}`);
-    }
-    const chats = sources.reduce((n, x) => n + x.chats.length, 0);
-    if (!chats) { note('No exports found there. An export has a “conversations” folder with a messages.json for each chat.'); return; }
-    if (!confirm(`Bring ${chats} chat${chats === 1 ? '' : 's'} from ${sources.length} export${sources.length === 1 ? '' : 's'} into “${dir.name}”?\n\n${sources.slice(0, 12).map((x) => `• ${x.name} (${x.chats.length})`).join('\n')}${sources.length > 12 ? '\n…' : ''}\n\nOnly messages and photos the library doesn’t have yet are added. The originals aren’t changed.`)) { note(''); return; }
-    await mergeExports(dir, sources, note, lines);
+    for (const x of problems) lines.push(`[${new Date().toISOString()}] ! ${x}`);
+    if (!sources.some((x) => x.chats.length)) { note(problems.join(' ') || 'There’s nothing to bring in there: no chats.'); return; }
+    // A phone backup's big file before its updates file, so nothing is missed.
+    const rank = (x) => (x.phone ? (x.manifest.updates_since ? 2 : 1) : 0);
+    sources.sort((a, b) => rank(a) - rank(b) || (a.phone && b.phone ? String(a.manifest.updates_since || a.manifest.created_at || '').localeCompare(String(b.manifest.updates_since || b.manifest.created_at || '')) : 0));
+    const rows = (await getLib(true)).rows || [];
+    const accounts = await readAccounts(libraryIO(dir));
+    await resolveAccounts(sources, rows, accounts, askSameAccount);
+    const partial = sources.find((x) => x.partial);
+    const updatesAlone = sources.some((x) => x.phone && x.manifest.updates_since) && !sources.some((x) => x.phone && !x.manifest.updates_since);
+    if (!confirm(`Bring ${sources.length === 1 ? 'this' : 'these'} into “${dir.name}”?\n\n${sources.map((x) => describeSource(x, rows)).join('\n')}${problems.length ? `\n\nLeft out:\n${problems.join('\n')}` : ''}${partial ? `\n\n${partial.partial}` : ''}${updatesAlone ? '\n\nThat’s an updates file: it has only the newest messages. Bring in its big backup too (now or before) for the rest.' : ''}\n\nOnly messages and photos that aren’t here yet are added. The files you picked aren’t changed.`)) { note(''); return; }
+    await mergeExports(dir, sources, note, lines, accounts);
+    await getLib(true);
+    if (tab === 'apps') renderApps();
   } catch (e) {
     if (e.name !== 'AbortError') note(e.message);
   }
 }
 
+// The address book in the library (contacts.json, and contacts.js for the
+// folder's index.html), replaced by a phone backup's when that's newer. A
+// phone that stopped saving every contact brings an empty one, which takes
+// them out. Returns the book written, or null.
+async function newestBook(io, sources, log) {
+  let have = null;
+  try { have = JSON.parse((await io.readText('contacts.json')) || 'null'); } catch { /* none yet */ }
+  let best = null;
+  for (const src of sources) {
+    const b = src.book ? await src.book() : null;
+    if (b && (!best || b.captured_at > best.captured_at)) best = b;
+  }
+  if (!best || (have?.captured_at && have.captured_at >= best.captured_at)) return null;
+  const book = { format: 'gm-address-book', version: 1, captured_at: best.captured_at, contacts: best.contacts };
+  await io.write('contacts.json', JSON.stringify(book, null, 2));
+  await io.write('contacts.js', `window.GM_CONTACTS = ${JSON.stringify(book)};\n`);
+  log(book.contacts.length ? `Address book: ${book.contacts.length} contacts from the phone` : 'Address book: emptied (the phone no longer saves every contact)');
+  return book;
+}
+
 // Merges the chats of `sources` into the library in `dir`, then rewrites the
 // library's index, verification report, whole-library CSV, log and checksums.
-async function mergeExports(dir, sources, note, lines = []) {
+async function mergeExports(dir, sources, note, lines = [], accounts = null) {
   const log = (t) => lines.push(`[${new Date().toISOString()}] ${t}`);
   const chats = sources.reduce((n, x) => n + x.chats.length, 0);
   const started = new Date();
   const io = libraryIO(dir);
   const lib = await GMLib.readLibrary(io, log);
   const rows = lib?.rows || [];
-  const report = { chats: [], newChats: 0, messages: 0, media: 0, skipped: 0, missing: 0, mismatch: 0, errors: 0 };
+  accounts = accounts || await readAccounts(io);
+  await resolveAccounts(sources, rows, accounts, null);
+  const report = { chats: [], newChats: 0, messages: 0, media: 0, skipped: 0, missing: 0, mismatch: 0, errors: 0, left: {} };
+  // Codes, promotions or automated texts Settings leaves out (importChat).
+  report.skip = GMLib.skipKinds(await getSettings());
+  if (report.skip.size) { try { report.labels = JSON.parse((await io.readText('labels.json')) || 'null'); } catch { /* none */ } }
   log(`Importing ${chats} chats from: ${sources.map((x) => x.name).join(', ')}`);
   let n = 0;
   for (const src of sources) {
@@ -1559,24 +2088,33 @@ async function mergeExports(dir, sources, note, lines = []) {
     }
   }
 
+  if (accounts.changed) { delete accounts.changed; await io.write('accounts.json', JSON.stringify(accounts, null, 2)); }
+  // The phone's address book: the newest a phone backup brought, which
+  // People, the viewer and the Obsidian notes tie chats to.
+  const book = await newestBook(io, sources, log);
+  if (book) report.book = book.contacts.length;
   note('Updating the library’s index and checksums…');
+  const leftOut = Object.entries(report.left);
   const summary = `Imported ${report.chats.length} chat${report.chats.length === 1 ? '' : 's'} (${report.newChats} new to the library): ${report.messages.toLocaleString()} messages and ${report.media.toLocaleString()} media files added; ${report.skipped.toLocaleString()} messages were already there.` +
-    `${report.missing ? ` ${report.missing} media files were missing from the exports.` : ''}${report.mismatch ? ` ${report.mismatch} didn’t match their recorded checksums (see the log).` : ''}${report.errors ? ` ${report.errors} chats couldn’t be read (see the log).` : ''}`;
+    `${leftOut.length ? ` Left out ${leftOut.map(([k, n]) => `${n.toLocaleString()} chat${n === 1 ? '' : 's'} of ${GMLib.CHAT_KINDS[k].toLowerCase()}`).join(', ')} (Settings → Leave out of your archive).` : ''}` +
+    `${report.book ? ` The phone’s address book (${report.book.toLocaleString()} contacts) ties chats from every app to their people.` : report.book === 0 ? ' The phone no longer saves every contact, so the address book was emptied.' : ''}${report.missing ? ` ${report.missing} media files were missing from the exports.` : ''}${report.mismatch ? ` ${report.mismatch} didn’t match their recorded checksums (see the log).` : ''}${report.errors ? ` ${report.errors} chats couldn’t be read (see the log).` : ''}`;
   log(summary);
   await finishLibraryRun(io, rows, lib?.exp, { kind: 'import', started_at: started.toISOString(), source: sources.map((x) => x.name).join(', '), chats: report.chats, added_messages: report.messages, added_media: report.media },
     lines, summary, { ok: !report.errors, added: report.messages, target: sources.map((x) => x.name).join(', ') });
   const fresh = rows.filter((r) => r.id && r.status === 'incomplete' && report.chats.includes(r.title));
-  $('importMsg').innerHTML = `${esc(summary)}${fresh.length ? ` Chats new to the library show as “Unfinished” until a backup reads them in full from Messages. <button id="importToList" class="tonal small">Add them to my backup list</button>` : ''}`;
+  importMsg().innerHTML = `${esc(summary)}${fresh.length ? ` Chats new to the library show as “Unfinished” until a backup reads them in full from Messages. <button id="importToList" class="tonal small">Add them to my backup list</button>` : ''}`;
   importedRows = fresh;
   return report;
 }
 let importedRows = [];
-$('importFolder').onclick = () => importExports('folder');
-$('importZip').onclick = () => importExports('zip');
-$('importPhone').onclick = () => importExports('phone');
+$('importAny').onclick = () => importAnything(false);
+$('importAnyFolder').onclick = () => importAnything(true);
+// A phone backup opened with the app (File Handling: "Open with", or a double
+// click once the app is the default for .tar files).
+window.MA_APP?.onFiles((handles) => { showTab('tools'); importAnything(false, handles); });
 
 // ---------- bring in conversations from other apps ----------
-// Each app's own export (importers/), read into library chats and merged like
+// Each app's own export (modules/), read into library chats and merged like
 // any other export: matched to chats of the same app, only new messages added.
 
 // "Which one is you?": asked when an export doesn't say whose it is, and
@@ -1587,6 +2125,8 @@ async function whoAmI(service, names, hint = {}) {
   if (known) return known;
   if (!names.length) return null;
   const pick = await new Promise((resolve) => {
+    $('whoTitle').textContent = 'Which one is you?';
+    $('whoSkip').textContent = 'None of these';
     $('whoText').textContent = `In ${GMLib.serviceLabel(service)}${hint.chat ? ` (“${hint.chat}”)` : ''}, which name is yours? Your messages are shown on your side, and the name is remembered for next time.`;
     $('whoList').innerHTML = names.slice(0, 40).map((n, i) => `<button class="outlined" data-who="${i}" style="text-align:left">${esc(n)}</button>`).join('');
     $('whoList').onclick = (e) => { const b = e.target.closest('[data-who]'); if (b) { $('whoDlg').close(); resolve(names[+b.dataset.who]); } };
@@ -1597,35 +2137,140 @@ async function whoAmI(service, names, hint = {}) {
   return pick;
 }
 
-$('appHow').innerHTML = GMImport.list().map((i) => `<li><b>${esc(i.label)}:</b> ${esc(i.how)}</li>`).join('');
+$('importHow').innerHTML = [
+  ['Message Archivist (Android)', 'In the app: Back up this phone, then copy the .tar it saved to this computer (from Google Drive, wait until the download has finished; Drive asks “Download anyway?” for big files). If you use an updates file, pick it too. Chats you shared to the app from WhatsApp, and downloads you added there, come in with it.'],
+  ...GMLib.modules().filter((m) => m.reader).map((m) => [m.label, m.steps.join(' ')]),
+  ['Earlier versions of this extension', 'The zips or folders they made (a folder that holds several is fine too).'],
+].map(([k, v]) => `<li><b>${esc(k)}:</b> ${esc(v)}</li>`).join('');
 
-async function importFromApp(pickFolder) {
-  const note = (t) => { $('importAppMsg').textContent = t; };
-  const lines = [];
+// ---------- apps ----------
+// One card per app module (modules/, GMLib.modules()): Google Messages, the
+// core, first, then each other app with what the archive has from it, when
+// its chats last came in, and how to get its export; then the apps that
+// can't come in yet, and why.
+const PHONE = {
+  share: 'On Android you can share the export to the Message Archivist app instead: it goes into your phone backup, and comes in here with it.',
+  download: 'On Android you can download it on the phone and share it to the Message Archivist app (or add it there): it goes into your phone backup, and comes in here with it.',
+};
+async function renderApps() {
+  const lib = await getLib();
+  const have = new Map();
+  for (const r of lib.rows || []) {
+    const s = GMLib.serviceOf(r);
+    const a = have.get(s) || { chats: 0, messages: 0, at: null };
+    a.chats++;
+    a.messages += r.count || 0;
+    if (r.imported_at && (!a.at || r.imported_at > a.at)) a.at = r.imported_at;
+    have.set(s, a);
+  }
+  const day = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  const status = (m) => {
+    const a = have.get(m.id);
+    if (!a) return lib.rows ? 'Nothing in your archive from it yet.' : '';
+    return `${a.chats.toLocaleString()} chat${a.chats === 1 ? '' : 's'}, ${a.messages.toLocaleString()} message${a.messages === 1 ? '' : 's'} in your archive${a.at ? `; last brought in ${day(a.at)}` : ''}.`;
+  };
+  const all = GMLib.modules();
+  // An app's web page reader (the extension only: the app can't register one):
+  // whether it's on, and what it has kept for the archive.
+  const web = new Map();
+  if (chrome.scripting?.getRegisteredContentScripts) {
+    const regs = await chrome.scripting.getRegisteredContentScripts().catch(() => []);
+    const kept = await chrome.storage.local.get(null);
+    for (const m of all.filter((x) => x.web)) {
+      const keys = Object.keys(kept).filter((k) => k.startsWith(`webcap:${m.id}:`));
+      web.set(m.id, {
+        on: regs.some((r) => r.id === `web-${m.id}`) && await chrome.permissions.contains({ origins: m.web.origins }),
+        chats: keys.length, messages: keys.reduce((n, k) => n + Object.keys(kept[k]?.items || {}).length, 0),
+      });
+    }
+  }
+  const webBlock = (m) => {
+    const w = web.get(m.id);
+    if (!w) return '';
+    return `<div class="web-read">
+      <label class="check"><input type="checkbox" data-web="${esc(m.id)}"${w.on ? ' checked' : ''}> Keep the chats I open on ${esc(m.web.label)}</label>
+      <p class="secondary">Its download has only saved messages, so this keeps the others as you read them there. It only reads the page: no clicks, no Snaps opened, nothing saved in ${esc(m.label)}, no screenshots. Reload ${esc(m.web.label)} after turning it on.${w.messages ? ` <b>${w.messages.toLocaleString()} message${w.messages === 1 ? '' : 's'} from ${w.chats.toLocaleString()} chat${w.chats === 1 ? '' : 's'} waiting.</b>` : ''}</p>
+      ${w.messages ? `<button class="filled small" data-webin="${esc(m.id)}">Put them in my archive</button>` : ''}
+    </div>`;
+  };
+  const card = (m, actions) => `<section class="card app-card" style="--app:${esc(m.color)}">
+    <h2><span class="app-dot"></span>${esc(m.label)}</h2>
+    <span class="secondary">${esc(status(m))}${m.partial ? ` ${esc(m.partial)}` : ''}</span>
+    ${m.steps?.length ? `<ol class="app-steps secondary">${m.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}
+    ${PHONE[m.phone] ? `<p class="secondary">${esc(PHONE[m.phone])}</p>` : ''}
+    ${m.web ? webBlock(m) : ''}
+    <div class="row">${actions}</div></section>`;
+  const later = all.filter((m) => m.later);
+  $('appCards').innerHTML = [
+    ...all.filter((m) => m.core).map((m) => card(m, '<button class="tonal small" data-go="backups">Backups</button><button class="outlined small" data-go="restore">Phone restore</button>')),
+    ...all.filter((m) => !m.core && m.reader).map((m) => card(m, `<button class="tonal small" data-bring="files">Bring in ${esc(m.label)} files…</button><button class="outlined small" data-bring="folder">A folder…</button>`)),
+    later.length ? `<section class="card"><h2>Not yet</h2>${later.map((m) => `<p class="secondary"><b>${esc(m.label)}:</b> ${esc(m.later)}</p>`).join('')}</section>` : '',
+  ].join('');
+}
+$('appCards').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-go], button[data-bring], button[data-webin]');
+  if (!b) return;
+  if (b.dataset.go) showTab(b.dataset.go);
+  else if (b.dataset.webin) bringInWeb(b.dataset.webin);
+  else importAnything(b.dataset.bring === 'folder');
+});
+$('appCards').addEventListener('change', async (e) => {
+  const box = e.target.closest('input[data-web]');
+  const m = box && GMLib.module(box.dataset.web);
+  if (!m?.web) return;
+  box.checked = await setWebReader(m, box.checked).catch((err) => { importMsg().textContent = err.message; return false; });
+  renderApps();
+});
+
+// Turns an app's web page reader on or off: Chrome is asked to let the
+// extension read that site (an optional permission, asked only here, on the
+// click), and the reader is registered for its pages; off, it's unregistered
+// and the permission given back.
+async function setWebReader(m, on) {
+  const id = `web-${m.id}`;
+  if (on && !(await chrome.permissions.request({ origins: m.web.origins }))) return false;
+  await chrome.scripting.unregisterContentScripts({ ids: [id] }).catch(() => {});
+  if (!on) { await chrome.permissions.remove({ origins: m.web.origins }).catch(() => {}); return false; }
+  await chrome.scripting.registerContentScripts([{ id, matches: m.web.matches, js: [m.web.script], runAt: 'document_idle', persistAcrossSessions: true }]);
+  return true;
+}
+
+// Puts what an app's web page reader kept (webcap:<service>:*, background.js)
+// into the archive, as an import of its own ("<App> for Web"), then takes it
+// out of the queue. The keys it put in are kept (webdone:…), so reading those
+// chats again doesn't queue them again; what the page read meanwhile stays.
+async function bringInWeb(service) {
+  const note = (t) => { importMsg().textContent = t; };
   try {
     const dir = await folderForReading();
-    const picked = pickFolder ? [await window.showDirectoryPicker({ id: 'gm-import-app', mode: 'read' })]
-      : await Promise.all((await window.showOpenFilePicker({ id: 'gm-import-app', multiple: true })).map((h) => h.getFile()));
-    const ctx = { whoAmI, locale: navigator.language };
-    const sources = [];
-    for (const p of picked) {
-      note(`Reading ${p.name}…`);
-      try { sources.push((await GMImport.open(p, ctx)).source); } catch (e) { note(e.message); if (picked.length === 1) return; lines.push(`[${new Date().toISOString()}] ! ${e.message}`); }
+    const kept = await chrome.storage.local.get(null);
+    const keys = Object.keys(kept).filter((k) => k.startsWith(`webcap:${service}:`));
+    if (!keys.length) { note('Nothing is waiting.'); return; }
+    const src = GMImport.webSource(service, keys.map((k) => kept[k]));
+    const rows = (await getLib(true)).rows || [];
+    const accounts = await readAccounts(libraryIO(dir));
+    await resolveAccounts([src], rows, accounts, askSameAccount);
+    await mergeExports(dir, [src], note, [], accounts);
+    const now = await chrome.storage.local.get(keys.flatMap((k) => [k, k.replace(/^webcap:/, 'webdone:')]));
+    for (const k of keys) {
+      const doneKey = k.replace(/^webcap:/, 'webdone:');
+      const put = Object.keys(kept[k]?.items || {});
+      const left = { ...(now[k]?.items || {}) };
+      for (const key of put) delete left[key];
+      await chrome.storage.local.set({ [doneKey]: [...new Set([...(now[doneKey] || []), ...put])] });
+      if (Object.keys(left).length) await chrome.storage.local.set({ [k]: { ...now[k], items: left } });
+      else await chrome.storage.local.remove(k);
     }
-    if (!sources.length) return;
-    const describe = (src) => `• ${src.name}: ${src.chats.length.toLocaleString()} ${GMLib.serviceLabel(src.chat(src.chats[0])?.data.service || src.service)} chat${src.chats.length === 1 ? '' : 's'}, ${src.chats.reduce((n, k) => n + src.chat(k).data.messages.length, 0).toLocaleString()} messages`;
-    const partial = sources.find((x) => x.partial);
-    if (!confirm(`Bring these into “${dir.name}”?\n\n${sources.map(describe).join('\n')}\n\n${partial ? `${partial.partial}\n\n` : ''}They’re kept beside your other chats, marked with their app. Only messages that aren’t here yet are added; the export isn’t changed.`)) { note(''); return; }
-    await mergeExports(dir, sources, note, lines);
-    $('importAppMsg').innerHTML = $('importMsg').innerHTML;
-    $('importMsg').innerHTML = '';
     await getLib(true);
+    renderApps();
   } catch (e) {
     if (e.name !== 'AbortError') note(e.message);
   }
 }
-$('importApp').onclick = () => importFromApp(false);
-$('importAppFolder').onclick = () => importFromApp(true);
+$('appsImport').onclick = () => importAnything(false);
+$('appsImportFolder').onclick = () => importAnything(true);
+
+
 document.addEventListener('click', async (e) => {
   if (e.target.id !== 'importToList') return;
   const s = await getSettings();
@@ -1708,6 +2353,16 @@ if (!routed) {
     showTab('settings');
     settingsMode(false);
     $('chooseFolder').scrollIntoView({ block: 'center' });
-  } else showTab(TABS.includes(h) ? h : 'home', { push: h !== 'welcome' });
+  } else if (h.startsWith('archive/')) openArchive(h.slice(8));
+  else if (TABS.includes(h) || h === 'welcome') showTab(TABS.includes(h) ? h : 'home', { push: h !== 'welcome' });
+  // Nothing asked for: the archive once there's a folder, else Home and its setup steps.
+  else getDir().then((dir) => showTab(dir ? 'archive' : 'home'));
 }
-addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== tab) showTab(h, { push: false }); });
+addEventListener('hashchange', () => {
+  const h = location.hash.slice(1);
+  if (h.startsWith('archive/')) { openArchive(h.slice(8)); return; }
+  // The app's viewer opens these in the Settings window it already has.
+  if (h.startsWith('delete:')) { showTab('backups'); askDelete(decodeURIComponent(h.slice(7)), false); return; }
+  if (h === 'folder') { showTab('settings'); settingsMode(false); $('chooseFolder').scrollIntoView({ block: 'center' }); return; }
+  if (TABS.includes(h) && h !== tab) showTab(h, { push: false });
+});

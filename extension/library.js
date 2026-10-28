@@ -11,35 +11,393 @@
 globalThis.GMLib = globalThis.GMLib || (() => {
   const INDEX_VERSION = 5;
 
-  // ---------- the apps a conversation can come from ----------
-  // Every chat in the library belongs to one service. Text messages (SMS, MMS
-  // and RCS: Google Messages for Web, and phone backups from the Android app)
-  // are "sms", the default, so libraries from before services read as they
-  // are. Other apps' chats come in through importers (importers/) and live in
-  // conversations/<folder>/<chat>/. `ids` says what identifies a person there,
-  // which is how the viewer finds the same person in several apps.
-  const SERVICES = {
-    sms: { label: 'Text messages', short: 'SMS', folder: null, color: '#1a73e8', ids: 'phone' },
-    whatsapp: { label: 'WhatsApp', short: 'WA', folder: 'WhatsApp', color: '#25d366', ids: 'phone' },
-    telegram: { label: 'Telegram', short: 'TG', folder: 'Telegram', color: '#2aabee', ids: 'phone or username' },
-    discord: { label: 'Discord', short: 'DC', folder: 'Discord', color: '#5865f2', ids: 'username' },
-    instagram: { label: 'Instagram', short: 'IG', folder: 'Instagram', color: '#d62976', ids: 'username' },
-    messenger: { label: 'Messenger', short: 'FB', folder: 'Messenger', color: '#0084ff', ids: 'name' },
-    tiktok: { label: 'TikTok', short: 'TT', folder: 'TikTok', color: '#444444', ids: 'username' },
-    imessage: { label: 'iMessage', short: 'iM', folder: 'iMessage', color: '#34c759', ids: 'phone or email' },
-    signal: { label: 'Signal', short: 'SG', folder: 'Signal', color: '#3a76f0', ids: 'phone' },
-  };
+  // ---------- the apps a conversation can come from: modules ----------
+  // Every chat in the library belongs to one source (service). Google
+  // Messages is the core: its texts (SMS, MMS and RCS, from Google Messages
+  // for Web and the Android app's phone backups) are "sms", the default, so
+  // libraries from before services read as they are. Every other app is a
+  // module: one file in modules/ that adds itself here (addModule) wherever
+  // the archive is read or written (Settings, the viewer, the Messages
+  // page's content script, the backup folder's index.html), its chats in
+  // conversations/<folder>/<chat>/. Texts from elsewhere stay apart: iMessage
+  // (with an iPhone's SMS) is a module of its own. A module is
+  //   { id, label, short, color, folder, ids, book?, partial?, steps, phone?, later?, reader? }
+  // id: the `service` its chats carry. label, short, color: how it shows.
+  // ids: what identifies a person there, which is how the viewer finds the
+  // same person in several apps. book: its names are the phone's contacts'
+  // (People may tie a chat to a contact by a name). partial: what its export
+  // always leaves out. steps: how to get its export, in Settings' Apps tab.
+  // phone: what the Android app takes ('share': an export shared to it from
+  // the app; 'download': a file downloaded on the phone). later: why it can't
+  // come in yet. reader: { detect, open, explain? }, read by import.js
+  // (GMImport, Settings only), which may serve two modules (Meta's).
+  const SERVICES = {}; // id -> how the module shows and files its chats: { label, short, folder, color, ids, book? }
+  const MODULES = new Map();
+  function addModule(m) {
+    if (!m?.id || !m.label) throw new Error('A module needs an id and a label.');
+    MODULES.set(m.id, m);
+    SERVICES[m.id] = { label: m.label, short: m.short || m.label.slice(0, 2).toUpperCase(), folder: 'folder' in m ? m.folder : m.label, color: m.color || '#888888', ids: m.ids || 'name', ...(m.book ? { book: true } : {}) };
+    return m;
+  }
+  const modules = () => [...MODULES.values()];
+  const moduleOf = (id) => MODULES.get(id) || null;
+  // The core: what this extension backs up from Google Messages for Web, and
+  // the Android app from the phone itself.
+  addModule({
+    id: 'sms', core: true, label: 'Google Messages', short: 'GM', folder: null, color: '#1a73e8', ids: 'phone', book: true,
+    steps: [
+      'Back up from Google Messages for Web with this extension: open messages.google.com, then a chat, and click the toolbar button (or Back up everything).',
+      'Or back up the phone itself with the Message Archivist Android app, and bring its .tar in here.',
+    ],
+  });
   const serviceOf = (x) => (x && (x.service || x.svc)) || 'sms';
   const serviceLabel = (id) => SERVICES[id]?.label || id;
-  const RESERVED = new Set(Object.values(SERVICES).map((v) => v.folder?.toLowerCase()).filter(Boolean));
+  // The folder an app's chats go in ("Google Messages" for a second account's texts).
+  const appFolder = (service) => SERVICES[service]?.folder || SERVICES[service]?.label || service;
+
+  // ---------- accounts: which of your numbers or IDs within an app ----------
+  // Two phones, a work number, another Apple ID or Telegram account: each is
+  // an account, and a chat only ever joins chats of the same app *and*
+  // account. A chat is in its app's main account unless it says otherwise
+  // (`account`, `account_label` in messages.json and its index row), so every
+  // library from before accounts reads as it is. accounts.json, beside data.js,
+  // remembers which ID is each app's main account once an import has said
+  // (Settings, `resolveAccounts`).
+  // Numbers compare by their last ten digits; anything else by its lower case.
+  const accountKey = (id) => { const t = String(id ?? '').trim(); return !t ? '' : NUMBER_TITLE.test(t) ? `tel:${phoneKey(t)}` : `id:${t.toLowerCase()}`; };
+  const accountOf = (x) => (x && x.account) || null;
+  const sameAccount = (a, b) => accountKey(a) === accountKey(b);
+  // How an account shows: a number formatted, anything else as it is.
+  const accountLabel = (id, label) => label || (NUMBER_TITLE.test(String(id || '').trim()) ? formatNumber(String(id)) : String(id || ''));
+  const reserved = (name) => Object.values(SERVICES).some((v) => v.folder && v.folder.toLowerCase() === name.toLowerCase());
   // Where a new chat's folder goes: text messages straight in conversations/
   // (as always), every other app in its own folder there. A text chat named
   // like an app's folder gets " (chat)" so the two never share a folder.
-  function chatFolder(service, title) {
+  function chatFolder(service, title, account = null) {
     const name = safeName(title);
+    // A second account's chats: conversations/<App> - <account>/<chat>.
+    if (account?.id) return `conversations/${safeName(`${appFolder(service)} - ${accountLabel(account.id, account.label)}`)}/${name}`;
     const folder = SERVICES[service]?.folder;
-    if (!folder) return `conversations/${RESERVED.has(name.toLowerCase()) ? `${name} (chat)` : name}`;
+    if (!folder) return `conversations/${reserved(name) ? `${name} (chat)` : name}`;
     return `conversations/${folder}/${name}`;
+  }
+
+  // ---------- people: one person across apps, accounts and numbers ----------
+  // The same someone texts you, writes on WhatsApp and has an Instagram
+  // account, and may have had two numbers. A person is a set of one-to-one
+  // chats. Chats that share a number (in any app), an email address, or a
+  // handle in one app (a Telegram user ID, a Discord, TikTok or Snapchat
+  // username) are the same person by themselves. A name in common isn't enough: names are
+  // whatever you or they typed, so same-named people are only suggested.
+  // people.json (and people.js, for index.html opened from disk) keeps what
+  // the owner decided, by chat (chatKey), and is written by the viewer:
+  //   joined [[a, b]]  the same person
+  //   apart  [[a, b]]  not the same person (stops the suggestion)
+  //   alone  [a]       split off from the chats it shares a number with
+  //   names  { a: n }  the person's name, kept on one of their chats
+  const PEOPLE_VERSION = 1;
+  const chatKey = (row) => row.id || row.folder;
+  const othersIn = (row) => (row.contact?.people || []).filter((p) => (p.n ?? p.name) !== 'Me');
+  const isGroupChat = (row) => row.group === true || othersIn(row).length > 1;
+  // A chat with one other person: by its contact card, or for texts with no
+  // card, by its name. Channels and "Saved Messages" have no one else in them.
+  const isPersonChat = (row) => !isGroupChat(row) && (othersIn(row).length === 1 || (!othersIn(row).length && serviceOf(row) === 'sms' && (row.participants || []).filter((p) => p !== 'Me').length <= 1));
+  const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  // What says who someone is: their number (last ten digits), email address,
+  // or handle in an app; and, from a phone backup, the phone's contact
+  // (`card`): its other numbers and emails, and the contact itself, so their
+  // chats from every number they've had join up.
+  function idsOf(p, service) {
+    const ids = [];
+    const tel = (s) => { const d = String(s ?? '').replace(/\D/g, ''); if (d.length >= 7) ids.push(`tel:${d.slice(-10)}`); };
+    const name = String(p.n ?? p.name ?? '').trim();
+    const h = String(p.h ?? p.handle ?? '').trim().toLowerCase();
+    tel(p.num ?? p.number);
+    if (EMAIL.test(name)) ids.push(`email:${name.toLowerCase()}`);
+    else if (NUMBER_TITLE.test(name)) tel(name);
+    if (h) ids.push(EMAIL.test(h) ? `email:${h}` : `${service}:${h}`);
+    for (const n of p.card?.numbers || []) tel(n);
+    for (const e of p.card?.emails || []) if (EMAIL.test(e)) ids.push(`email:${String(e).toLowerCase()}`);
+    if (p.card?.key) ids.push(`contact:${p.card.key}`);
+    return ids;
+  }
+  // A one-to-one chat's person: from its contact card, else from its name
+  // when that's a number, short code or email address.
+  function personIds(row) {
+    const ids = new Set(othersIn(row).flatMap((p) => idsOf(p, serviceOf(row))));
+    if (!ids.size && row.title) {
+      for (const id of idsOf({ n: row.title }, serviceOf(row))) ids.add(id);
+      const d = String(row.title).replace(/\D/g, '');
+      if (!ids.size && NUMBER_TITLE.test(row.title) && d.length >= 3) ids.add(`tel:${d}`); // a short code
+    }
+    return [...ids];
+  }
+  // The name a chat knows its person by: not a number, and not an importer's
+  // stand-in ("TikTok chat 3").
+  const STAND_IN = /^(unknown|conversation|.+ (chat|channel) \d+)$/i;
+  function personName(row) {
+    const o = othersIn(row);
+    const n = String((o.length === 1 && (o[0].n ?? o[0].name)) || row.title || '').trim();
+    return n && !isNumberName(n) && !EMAIL.test(n) && !STAND_IN.test(n) ? n : null;
+  }
+  // Names compare without case, accents or punctuation.
+  const nameKey = (s) => String(s || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  // Names from the phone's contacts (yours) beat names people gave themselves:
+  // the apps whose module says its names are the phone's (`book`).
+  const fromBook = (service) => !!SERVICES[service]?.book;
+  const pairKey = (a, b) => [a, b].sort().join('\n');
+
+  // The phone's address book (contacts.json, from a phone backup with "Save
+  // all my contacts" on): each contact by what ties a chat to them. A number
+  // or email address that's on two contacts ties to neither; so does a name.
+  function contactIndex(book) {
+    const by = new Map();
+    const add = (k, c) => { if (!k) return; by.set(k, by.has(k) && by.get(k) !== c ? null : c); };
+    for (const c of book?.contacts || []) {
+      if (!c?.key) continue;
+      for (const id of [...(c.numbers || []).flatMap((n) => idsOf({ num: n }, 'sms')), ...(c.emails || []).map((e) => `email:${String(e).toLowerCase()}`)]) add(id, c);
+      const n = nameKey(c.name);
+      if (n.length > 1) add(`name:${n}`, c);
+    }
+    // A chat's contact: by its ids, or, in an app whose names come from the
+    // phone's contacts (fromBook), by a name only one contact has.
+    return (ids, service, name) => {
+      const hits = new Set(ids.map((id) => by.get(id)).filter(Boolean));
+      if (!hits.size && fromBook(service) && name) { const c = by.get(`name:${nameKey(name)}`); if (c) hits.add(c); }
+      return hits.size === 1 ? [...hits][0] : null;
+    };
+  }
+  // What ties someone to a contact, as ids: the contact itself, and its
+  // numbers and email addresses (for the groups they're in).
+  const contactIds = (c) => (c ? [`contact:${c.key}`, ...(c.numbers || []).flatMap((n) => idsOf({ num: n }, 'sms')), ...(c.emails || []).map((e) => `email:${String(e).toLowerCase()}`)] : []);
+
+  // Everyone in the library: { list, byChat, suggestions, groupsOf }. Each
+  // person is { key, name, named, chats (rows, most messages first), ids,
+  // names, services, count, first, last, contact }; `key` is their first
+  // chat's key, `contact` their entry in the phone's address book (`book`,
+  // contacts.json), which joins their chats from every app and names them.
+  // Suggestions are pairs of people with a name in common ({ a, b, name }).
+  function people(rows, saved = null, book = null) {
+    const S = { joined: [], apart: [], alone: [], names: {}, ...(saved || {}) };
+    const alone = new Set(S.alone);
+    const solo = rows.filter(isPersonChat);
+    const contactOf = contactIndex(book);
+    const chatContact = new Map(solo.map((r) => [chatKey(r), contactOf(personIds(r), serviceOf(r), personName(r))]));
+    const idsOfChat = (r) => [...new Set([...personIds(r), ...contactIds(chatContact.get(chatKey(r)))])];
+    const up = new Map(solo.map((r) => [chatKey(r), chatKey(r)]));
+    const find = (k) => { while (up.get(k) !== k) { up.set(k, up.get(up.get(k))); k = up.get(k); } return k; };
+    const join = (a, b) => { if (up.has(a) && up.has(b)) up.set(find(b), find(a)); };
+    const seen = new Map();
+    for (const r of solo) {
+      if (alone.has(chatKey(r))) continue;
+      for (const id of idsOfChat(r)) { if (seen.has(id)) join(seen.get(id), chatKey(r)); else seen.set(id, chatKey(r)); }
+    }
+    for (const [a, b] of S.joined) join(a, b);
+    const groups = new Map();
+    for (const r of solo) { const k = find(chatKey(r)); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+    const count = (r) => r.count ?? r.messages?.length ?? 0;
+    const list = [...groups.values()].map((chats) => {
+      chats.sort((a, b) => count(b) - count(a));
+      const names = [...new Set(chats.map(personName).filter(Boolean))];
+      const own = chats.map((r) => S.names[chatKey(r)]).find(Boolean);
+      const book = chats.find((r) => fromBook(serviceOf(r)) && personName(r)) || chats.find(personName);
+      const contact = chats.map((r) => chatContact.get(chatKey(r))).find(Boolean) || null;
+      const ends = (f, pick) => chats.map((r) => r[f]).filter(Boolean).reduce((x, y) => (x == null || pick(y, x) ? y : x), null);
+      return {
+        key: chats.map(chatKey).sort()[0],
+        name: own || contact?.name || (book ? personName(book) : formatNumber(chats[0].title || '')) || '?',
+        named: !!own,
+        chats,
+        ids: [...new Set(chats.flatMap(idsOfChat))],
+        names,
+        services: [...new Set(chats.map(serviceOf))],
+        count: chats.reduce((t, r) => t + count(r), 0),
+        first: ends('first', (y, x) => y < x),
+        last: ends('last', (y, x) => y > x),
+        contact,
+      };
+    });
+    const byChat = new Map(list.flatMap((p) => p.chats.map((r) => [chatKey(r), p])));
+
+    const apart = new Set(S.apart.map(([a, b]) => pairKey(a, b)));
+    const isApart = (p, q) => p.chats.some((a) => q.chats.some((b) => apart.has(pairKey(chatKey(a), chatKey(b)))));
+    const byName = new Map();
+    for (const p of list) {
+      for (const n of new Set([p.name, ...p.names].map(nameKey).filter((k) => k.length > 1))) {
+        if (!byName.has(n)) byName.set(n, []);
+        byName.get(n).push(p);
+      }
+    }
+    const suggestions = [];
+    const asked = new Set();
+    for (const [name, ps] of byName) {
+      if (ps.length < 2 || ps.length > 4) continue; // "Mom" in four apps is likely; in forty, not
+      for (let i = 0; i < ps.length; i++) {
+        for (let j = i + 1; j < ps.length; j++) {
+          const k = pairKey(ps[i].key, ps[j].key);
+          if (asked.has(k) || isApart(ps[i], ps[j])) continue;
+          asked.add(k);
+          suggestions.push({ a: ps[i], b: ps[j], name });
+        }
+      }
+    }
+
+    // The group chats someone is in: by number, email or handle, or, for a
+    // member the group knows only by name, by name in a group from the same
+    // app. A member with a number is that number's person only: matching
+    // their name too would put everyone else with that name in the group.
+    const inGroups = new Map();
+    for (const r of rows.filter(isGroupChat)) {
+      for (const p of othersIn(r)) {
+        const keys = idsOf(p, serviceOf(r));
+        const n = nameKey(p.n ?? p.name);
+        // Known only by name: their contact, when only one has that name.
+        if (n && !keys.length) keys.push(`name:${serviceOf(r)}|${n}`, ...contactIds(contactOf([], serviceOf(r), p.n ?? p.name)).slice(0, 1));
+        for (const k of keys) { if (!inGroups.has(k)) inGroups.set(k, new Set()); inGroups.get(k).add(r); }
+      }
+    }
+    const groupsOf = (p) => {
+      const keys = [...p.ids, ...p.chats.filter(personName).map((r) => `name:${serviceOf(r)}|${nameKey(personName(r))}`)];
+      return [...new Set(keys.flatMap((k) => [...(inGroups.get(k) || [])]))].sort((a, b) => count(b) - count(a));
+    };
+    return { list, byChat, suggestions, groupsOf };
+  }
+
+  // ---------- codes, promotions and automated texts ----------
+  // What clutters an archive: one-time codes ("123456 is your verification
+  // code"), promotions and spam ("Reply STOP to opt out", or a link from a
+  // number you don't know), and other automated texts (alerts, deliveries and
+  // reminders from short codes and business names). Told apart per chat, from
+  // who it's with (senderOf) and what its messages look like (chatTraits),
+  // never in a group or a chat you've talked in. The viewer keeps them out of
+  // All chats (its Codes, Promotions and Automated folders); Settings can
+  // leave them out of the archive altogether (skipCodes, skipPromos,
+  // skipAutomated).
+  const CHAT_KINDS = { codes: 'Verification codes', promos: 'Promotions and spam', automated: 'Other automated texts' };
+  // The rules' version, kept in each chat's traits (`v`): where an index row's
+  // traits are used (leaving chats out), a row counted by older rules is counted
+  // again from its chat. Raise it whenever a rule below changes.
+  const TRAITS_VERSION = 2;
+  const CODE_WORD = /\b(?:codes?|otp|one[- ]?time|pass ?code|pin|2fa|two[- ](?:factor|step)|verif(?:y|ying|ication)|authenticat\w*|log ?in|sign ?in|c[oó]digo|codice|kode?|bestätigungscode)\b|do(?:n['’]?t| not) share|never share/i;
+  const CODE_DIGITS = /(?:^|[^\w])(?:[A-Z]{1,3}-)?(?:\d{4,8}|\d{3}[- ]\d{3})(?!\w)/;
+  // The lines marketing texts carry, in any capitals: "Reply STOP", "STOP=end",
+  // "STOP2END", "STOP to quit", "End=STOP", "HELP4help", "Msg&data rates may
+  // apply", "Msg frequency varies", "4 msgs/mo". PROMO_CAPS: "Reply END" and
+  // the like only in capitals, so "I'll text end of day" isn't one.
+  const PROMO = /\b(?:reply|rply|text|txt|send|respond)\s+(?:back\s+|with\s+)?["“'(\[]?(?:st[o0]p\w*|unsub\w*|opt[- ]?out)\b|\bst[o0]p\s*(?:=|:|-+>?|→|>|2|to|4)\s*(?:end|quit|stop|cancel|opt[- ]?out|unsub\w*)\b|\b(?:end|quit|cancel|opt[- ]?out|unsub\w*)\s*=\s*st[o0]p\b|\bstop\s+receiving\b|\bopt[- ]?out\b|\bunsub(?:scribe)?\b|\bhelp\s*(?:=|:|4|for)\s*(?:help|info)\b|\breply\s+["“']?help\b|\b(?:msg|message)s?\s*(?:&|and|\+)\s*data\b|\brates\s+may\s+apply\b|\b(?:msg|message)\s*freq|\b\d+\s*(?:msgs?|messages)\s*(?:\/|per\s+)(?:mo|mth|month|wk|week|day)\b/i;
+  const PROMO_CAPS = /\b(?:[Rr]e?ply|REPLY|RPLY|[Tt]e?xt|TE?XT|[Ss]end|SEND|[Rr]espond|RESPOND)\s+["“'(\[]?(?:END|QUIT|CANCEL|UNSUBSCRIBE|OPTOUT)\b/;
+  const LINK = /\bhttps?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|co|ly|me|io|info|link|xyz|top|click|app|us|biz|site|online|shop)\/\S/i;
+  const SCAM = /\b(?:congrat\w*|winner|you(?:['’]ve| have)? won|prize|claim|gift ?card|reward|free|urgent|suspend\w*|locked|unusual activity|verify your|update your|package|parcel|deliver\w*|shipment|usps|fedex|dhl|toll|unpaid|overdue|refund|crypto|bitcoin|invest\w*|loan|pre-?approved|limited time|act now|click|sale|deals?|discount\w*|coupons?|promo\w*|offers?|shop now|order now|buy now|exclusive|bonus|cash ?back|earn\w*|hiring|part[- ]time|apply now|survey|donat\w*|chip in|\d{1,2}% off)\b/i;
+  // What a chat's messages look like: how many you sent and how many came in,
+  // and of those, how many are codes, promotions, links and links with
+  // scam-like words. Takes messages.json records or chat.js's short form.
+  function chatTraits(messages) {
+    const t = { v: TRAITS_VERSION, sent: 0, received: 0, codes: 0, promos: 0, links: 0, scams: 0 };
+    for (const m of messages || []) {
+      if (m.direction ? m.direction === 'sent' : !!m.d) { t.sent++; continue; }
+      if (m.kind === 'system') continue;
+      t.received++;
+      const x = String(m.text ?? m.x ?? '');
+      if (!x) continue;
+      if (x.length <= 400 && CODE_WORD.test(x) && CODE_DIGITS.test(x)) t.codes++;
+      if (PROMO.test(x) || PROMO_CAPS.test(x)) t.promos++;
+      if (LINK.test(x)) { t.links++; if (SCAM.test(x)) t.scams++; }
+    }
+    return t;
+  }
+  // Who a chat is with, for telling automated senders apart: 'group',
+  // 'contact' (a name of yours), 'short' (a short code: 3 to 6 digits),
+  // 'business' (a sender ID such as "AMAZON" or "VM-BANKX" instead of a
+  // number) or 'number' (a number or address with no name saved).
+  function senderOf(row) {
+    if (isGroupChat(row)) return 'group';
+    const p = othersIn(row)[0] || {};
+    const name = String(p.n ?? p.name ?? row.title ?? '').trim();
+    const num = String(p.num ?? p.number ?? '').trim();
+    if (/[a-z]/i.test(num) && !EMAIL.test(num)) return 'business';
+    if (!name || NUMBER_TITLE.test(name) || EMAIL.test(name)) {
+      const d = (num || name).replace(/\D/g, '');
+      return d.length >= 3 && d.length <= 6 ? 'short' : 'number';
+    }
+    // A text from "AMAZON" or "VM-HDFCBK" with no number behind it is a sender ID.
+    if (!num && serviceOf(row) === 'sms' && /^(?=.*[A-Z]{3})[A-Z0-9][A-Z0-9-]{2,}$/.test(name)) return 'business';
+    return 'contact';
+  }
+  // Which of CHAT_KINDS a chat is, if any. A contact needs more to go on (and
+  // a reply from you makes it a conversation); three messages of yours make
+  // any chat one.
+  function chatKind(row, traits = row.traits) {
+    if (!traits?.received) return null;
+    const who = senderOf(row);
+    if (who === 'group') return null;
+    const { sent = 0, received, codes = 0, promos = 0, links = 0, scams = 0 } = traits;
+    const contact = who === 'contact';
+    if (sent >= 3 || (contact && sent)) return null;
+    if (codes / received >= (contact ? 0.8 : 0.5) && (!contact || received >= 2)) return 'codes';
+    if (promos / received >= (contact ? 0.5 : 0.2)) return 'promos';
+    if (who === 'number' && scams && links / received >= 0.5 && received <= 20) return 'promos';
+    if (who === 'short' || who === 'business') return 'automated';
+    return null;
+  }
+  // With the owner's say (labels.json): a chat they kept ("It's not", `keep`)
+  // or labelled with anything but Spam is none; one labelled Spam is
+  // promotions and spam.
+  function chatKindFor(row, labels, traits = row.traits) {
+    const k = chatKey(row);
+    const ids = labels?.chats?.[k] || [];
+    if (labels?.keep?.[k] || ids.some((id) => id !== 'spam')) return null;
+    if (ids.includes('spam')) return 'promos';
+    return chatKind(row, traits);
+  }
+  // The kinds Settings leaves out of the archive.
+  const skipKinds = (s) => new Set([s?.skipCodes && 'codes', s?.skipPromos && 'promos', s?.skipAutomated && 'automated'].filter(Boolean));
+  // Whether traits were counted by the rules as they are now.
+  const traitsCurrent = (t) => t?.v === TRAITS_VERSION;
+
+  // The owner's decisions (people.json), changed: each returns a new object.
+  const peopleSaved = (s) => ({ version: PEOPLE_VERSION, joined: [], apart: [], alone: [], names: {}, ...(s || {}) });
+  const touched = (s) => ({ ...s, updated_at: new Date().toISOString() });
+  // Two people are one. The name each was given stays only if the other had none.
+  function joinPeople(saved, a, b) {
+    const s = peopleSaved(saved);
+    const all = new Set([...a.chats, ...b.chats].map(chatKey));
+    const names = { ...s.names };
+    if (a.named && b.named) for (const r of b.chats) delete names[chatKey(r)];
+    return touched({
+      ...s,
+      names,
+      joined: [...s.joined, [a.key, b.key]],
+      apart: s.apart.filter(([x, y]) => !(all.has(x) && all.has(y))),
+    });
+  }
+  // Not the same person: the suggestion goes away.
+  function keepApart(saved, a, b) {
+    const s = peopleSaved(saved);
+    return touched({ ...s, apart: [...s.apart, [a.key, b.key]] });
+  }
+  // One chat isn't this person after all: it becomes someone of its own, and
+  // the person's other chats stay together.
+  function splitChat(saved, person, row) {
+    const s = peopleSaved(saved);
+    const k = chatKey(row);
+    const rest = person.chats.map(chatKey).filter((x) => x !== k);
+    const names = { ...s.names };
+    if (person.named && names[k] && rest.length) { names[rest[0]] = names[k]; }
+    delete names[k];
+    return touched({
+      ...s,
+      names,
+      alone: [...new Set([...s.alone, k])],
+      joined: [...s.joined.filter(([x, y]) => x !== k && y !== k), ...rest.slice(1).map((x) => [rest[0], x])],
+    });
+  }
+  // A name for the person (empty: back to the name their chats give).
+  function renamePerson(saved, person, name) {
+    const s = peopleSaved(saved);
+    const names = { ...s.names };
+    for (const r of person.chats) delete names[chatKey(r)];
+    if (String(name || '').trim()) names[person.key] = String(name).trim();
+    return touched({ ...s, names });
   }
 
   // One message record from an importer, in the library's shape (the same
@@ -89,6 +447,14 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     downloadsSubfolder: 'Google Messages Exports',
     caseNote: '',
     schedules: [],
+    obsidian: false, // keep the Obsidian notes (obsidian.js) up to date after every backup and import
+    // Leave these out of the archive (chatKind): verification codes, promotions and spam, other automated texts.
+    skipCodes: false,
+    skipPromos: false,
+    skipAutomated: false,
+    // How lists of chats and people start out sorted (the archive's Chats and People, the Backups tab):
+    // 'auto' (each list's own: Recent, Most messages, Favorites then A–Z), 'recent', 'count' or 'name'.
+    chatSort: 'auto',
   };
   // Settings saved by 4.x: the three "full size" switches become one, the two
   // window switches become one choice, and the popup's remembered checkboxes
@@ -117,7 +483,26 @@ globalThis.GMLib = globalThis.GMLib || (() => {
   function unknownIn(saved, scraped) {
     const ids = new Set(saved.map((m) => m.id).filter(Boolean));
     const sigs = new Set(saved.map(sigOf));
-    return scraped.filter((m) => !(m.id && ids.has(m.id)) && !sigs.has(sigOf(m)));
+    const left = scraped.filter((m) => !(m.id && ids.has(m.id)) && !sigs.has(sigOf(m)));
+    // Messages read from an app's web page carry the span they were sent in
+    // (`web_window`, [from, to] ms: there, only a group's first message shows
+    // its time). Between those and the app's own export, two messages are the
+    // same when they're from the same side with the same words (or are both
+    // only a photo) and one's time is in the other's span, give or take a
+    // minute; each stands in for one other only.
+    if (!left.length || !(left.some((m) => m.web_window) || saved.some((m) => m.web_window))) return left;
+    const keyed = (m) => `${m.direction}|${normText(m.text) || ((m.media || []).length ? '\u0000photo' : '')}`;
+    const pool = new Map();
+    for (const s of saved) { const k = keyed(s); if (!pool.has(k)) pool.set(k, []); pool.get(k).push(s); }
+    const ms = (m) => Date.parse(m.timestamp_raw || '');
+    const within = (m, w) => !!w && Number.isFinite(ms(m)) && ms(m) >= w[0] - 60e3 && ms(m) <= w[1] + 60e3;
+    return left.filter((m) => {
+      const list = pool.get(keyed(m)) || [];
+      const i = list.findIndex((s) => within(s, m.web_window) || within(m, s.web_window));
+      if (i < 0) return true;
+      list.splice(i, 1);
+      return false;
+    });
   }
 
   // Merges new records into the saved ones by time. Equal times keep their
@@ -273,7 +658,7 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     return {
       e2ee: contact.end_to_end_encrypted ?? contact.e2ee ?? null,
       at: contact.captured_at || contact.at || null,
-      people: contact.people.map((p) => p.n !== undefined ? p : ({ n: p.name, num: p.number, photo: p.photo ? (p.photo.startsWith('data:') ? p.photo : `${folder}/${p.photo}`) : null, ...(p.favorite ? { fav: 1 } : {}) })),
+      people: contact.people.map((p) => p.n !== undefined ? p : ({ n: p.name, num: p.number, ...(p.handle ? { h: p.handle } : {}), photo: p.photo ? (p.photo.startsWith('data:') ? p.photo : `${folder}/${p.photo}`) : null, ...(p.favorite ? { fav: 1 } : {}), ...(p.card ? { card: p.card } : {}) })),
     };
   }
 
@@ -402,9 +787,9 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     for (const r of rows) apps[serviceOf(r)] = (apps[serviceOf(r)] || 0) + 1;
     summary.services = apps;
     let coverage = null;
-    // Coverage compares Google Messages' own list with the text chats only.
+    // Coverage compares Google Messages' own list with its chats in the main account only.
     if (state?.conversations?.length) {
-      const byId = new Map(rows.filter((r) => r.id && serviceOf(r) === 'sms').map((r) => [r.id, r]));
+      const byId = new Map(rows.filter((r) => r.id && serviceOf(r) === 'sms' && !accountOf(r)).map((r) => [r.id, r]));
       // Chats you deleted from the backup and chose not to back up again don't count.
       const skip = new Set((state.excluded || []).map((e) => e.id));
       const convs = state.conversations.filter((c) => !skip.has(c.id));
@@ -420,7 +805,7 @@ globalThis.GMLib = globalThis.GMLib || (() => {
         tool: 'Message Archivist', version,
         statuses: STATUS_LABEL,
         coverage,
-        chats: rows.map((r) => ({ title: r.title, service: serviceOf(r), id: r.id, folder: r.folder, status: r.status, problems: r.problems, messages: r.count, first: r.first, last: r.last,
+        chats: rows.map((r) => ({ title: r.title, service: serviceOf(r), ...(r.account ? { account: r.account } : {}), id: r.id, folder: r.folder, status: r.status, problems: r.problems, messages: r.count, first: r.first, last: r.last,
           media_saved: r.media_saved, media_failed: r.media_failed, media_pending: r.media_pending, checked_at: r.checked_at, details: `${r.folder}/progress.json` })),
       },
     };
@@ -437,16 +822,20 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     const contact = data?.contact || compact?.contact || null;
     const checks = progress?.checks || checkChat(msgs, progress, contact);
     const service = serviceOf(data || compact);
+    const account = accountOf(data || compact);
     return {
       id: id || data?.conversation_id || compact?.id || null,
       title: title || data?.conversation || compact?.title,
       ...(service !== 'sms' ? { service } : {}),
+      ...(account ? { account, account_label: (data || compact).account_label || accountLabel(account) } : {}),
       folder,
       file: `${folder}/chat.js`,
       participants: data?.participants || compact?.participants || [...new Set(msgs.map((m) => m.sender ?? m.s))],
       updated_at: data?.updated_at || data?.exported_at || compact?.updated_at || null,
       range: data?.range || compact?.range || null,
       ...(contact ? { contact: contactSummary(folder, contact) } : {}),
+      ...(data?.group ? { group: true } : {}),
+      traits: chatTraits(msgs),
       ...(data?.conversation_details?.pinned || compact?.pinned ? { pinned: true } : {}),
       count: list.length,
       first: dated[0]?.t || null,
@@ -459,6 +848,8 @@ globalThis.GMLib = globalThis.GMLib || (() => {
       status: checks.status,
       problems: checks.problems,
       checked_at: checks.checked_at,
+      // When another app's export last brought it in (Settings' Apps tab).
+      ...(progress?.imported?.at ? { imported_at: progress.imported.at } : {}),
     };
   }
 
@@ -495,7 +886,7 @@ globalThis.GMLib = globalThis.GMLib || (() => {
   // bytes, with no size or file-count limits that matter here (zip needs Zip64
   // past 4 GB or 65,535 files). Entries:
   //   media/<n>.<ext>          photos, videos and voice notes, as saved
-  //   threads/<nnnn>.ndjson    one JSON object per line per message
+  //   threads/<nnnn>.ndjson    one JSON object per line per message (gzipped, .ndjson.gz, in version 3)
   //   manifest.json            last: format, totals and every thread
   // See notes/Restore package.md.
   const RESTORE_FORMAT = 'gm-restore';
@@ -525,7 +916,7 @@ globalThis.GMLib = globalThis.GMLib || (() => {
 
   // The newest package format this reads: 2 lets a chat be in several pieces
   // (the Android app's daily backups). The extension itself writes 1.
-  const RESTORE_READS = 2;
+  const RESTORE_READS = 3; // 3: a chat's files can be gzipped (.ndjson.gz)
 
   // ---------- phone numbers ----------
 
@@ -582,6 +973,9 @@ globalThis.GMLib = globalThis.GMLib || (() => {
   // Opens a package from its headers alone, read a window at a time so that
   // many small photos cost few reads. Entries come back as slices of the file.
   async function readPackage(blob) {
+    // Say what's wrong in plain words: most often a download (from Google
+    // Drive, say) that hadn't finished, which leaves an empty or cut-short file.
+    if (!blob.size) throw new Error('That file is empty (0 bytes). If it came from Google Drive, its download didn’t finish: download it again and wait until it’s the backup’s full size (Drive asks “Download anyway?” for big files). Then bring it in.');
     const entries = new Map(); // name -> [offset, size]
     const WIN = 1 << 20;
     const dec = new TextDecoder();
@@ -592,6 +986,7 @@ globalThis.GMLib = globalThis.GMLib || (() => {
       const h = win.subarray(pos - winAt, pos - winAt + 512);
       if (h.every((b) => b === 0)) break;
       const str = (o, l) => { let e = o; while (e < o + l && h[e]) e++; return dec.decode(h.subarray(o, e)); };
+      if (!entries.size && str(257, 5) !== 'ustar') throw new Error('That file isn’t a backup from the Message Archivist app (it isn’t a .tar backup at all). Pick the .tar file the app saved.');
       const prefix = str(345, 155);
       const size = parseInt(str(124, 12).trim() || '0', 8);
       entries.set((prefix ? `${prefix}/` : '') + str(0, 100), [pos + 512, size]);
@@ -599,11 +994,14 @@ globalThis.GMLib = globalThis.GMLib || (() => {
     }
     const entry = (name) => { const e = entries.get(name); return e ? blob.slice(e[0], e[0] + e[1]) : null; };
     const m = entry('manifest.json');
-    if (!m) throw new Error('That isn’t a phone backup from the Message Archivist app (it has no manifest).');
+    // The list of chats is written last, so a file without it was cut short.
+    if (!m) throw new Error(entries.size ? `That backup file is incomplete: it stops before its end (${(blob.size / 1e6).toFixed(0)} MB read), so the list of chats written last is missing. If it’s still downloading or syncing, wait until it’s finished; otherwise download it again, or make a new backup.` : 'That isn’t a phone backup from the Message Archivist app.');
     const manifest = JSON.parse(await m.text());
     if (manifest.format !== RESTORE_FORMAT) throw new Error('That isn’t a phone backup from the Message Archivist app.');
     if (manifest.version > RESTORE_READS) throw new Error('That backup is from a newer version of the Message Archivist app. Update the extension first.');
-    const lines = async (name) => ((await entry(name)?.text()) || '').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+    // A chat's messages: gzipped by the Android app since version 3, plain before.
+    const text = (b) => (/\.gz$/.test(b.name) ? new Response(b.blob.stream().pipeThrough(new DecompressionStream('gzip'))).text() : b.blob.text());
+    const lines = async (name) => { const b = entry(name); return (b ? await text({ name, blob: b }) : '').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l)); };
     // A chat kept up to date by daily phone backups is in several pieces (`files`, version 2), oldest first.
     const threadLines = async (t) => (await Promise.all((t.files || [t.file]).map(lines))).flat();
     return { manifest, entry, lines, threadLines, size: (name) => entries.get(name)?.[1] ?? 0 };
@@ -650,14 +1048,16 @@ globalThis.GMLib = globalThis.GMLib || (() => {
       return m;
     });
     // Who's in the chat, as the phone's contacts have them: starred ones are
-    // favourites, and their photo (a small one, in the package) comes along.
+    // favourites, and their photo (a small one, in the package) and the rest
+    // of their contact (`card`: other numbers and emails, work, birthday,
+    // labels, relations) come along.
     const info = new Map((thread.people || []).map((p) => [p.address, p]));
     const people = thread.addresses.map((a) => {
       const p = info.get(a) || {};
       const name = names[a] || a;
       let photo = null;
       if (p.photo) { photo = `contact/${safeName(name)}${(p.photo.match(/\.[a-z0-9]{1,5}$/i) || ['.jpg'])[0]}`; files.set(photo, p.photo); }
-      return { name, number: a, ...(p.starred ? { favorite: true } : {}), ...(photo ? { photo } : {}) };
+      return { name, number: a, ...(p.starred ? { favorite: true } : {}), ...(photo ? { photo } : {}), ...(p.contact ? { card: p.contact } : {}) };
     });
     return {
       data: { conversation: thread.title || thread.addresses.join(', '), conversation_id: null, participants: [...new Set(messages.map((m) => m.sender))], messages,
@@ -774,11 +1174,18 @@ globalThis.GMLib = globalThis.GMLib || (() => {
 
   const safeName = (s) => (s || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/[. ]+$/, '').trim().slice(0, 60) || 'Conversation';
 
+  // The scripts and styles a page loads from beside it (its own tags; not
+  // data: and not what it loads itself, as the viewer does data.js): what goes
+  // into the backup folder with the viewer, as its index.html, the app
+  // modules included.
+  const pageFiles = (html) => [...String(html).matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="([^":#?]+\.(?:js|css))"/g)].map((m) => m[1]);
+
   const README = `Message Archivist library: your conversations, from every app
 
 index.html                          Open this in your browser: every chat, search,
                                     drill-downs, media and stats, all offline.
-viewer.js, theme.*, data.js         What index.html runs on. Keep them next to it.
+viewer.js, library.js, theme.*,     What index.html runs on, with modules/ (one file
+modules/, data.js                   per app). Keep them next to it.
 messages.csv                        Every message of every chat in one spreadsheet.
 verification.json                   How complete each chat's backup is, and why:
                                     first message reached, newest saved, media,
@@ -789,10 +1196,18 @@ logs/                               The full step-by-step log of each run.
 SHA256SUMS.txt                      SHA-256 checksum of every file. To check nothing
                                     has changed since:  shasum -a 256 -c SHA256SUMS.txt
 labels.json, labels.js              Your labels, flags and notes (not in the checksums).
+people.json, people.js              Who's who: chats you joined as one person, split
+                                    apart or renamed in the viewer's People tab.
+contacts.json, contacts.js          Your phone's address book, from a phone backup with
+                                    "Save all my contacts" on: ties chats from every app
+                                    to the contact they're with.
+Obsidian/                           Notes for Obsidian, if you turned them on: open
+                                    this folder (the whole backup) as a vault.
 conversations/<contact>/            A text-message chat (SMS, MMS and RCS).
 conversations/<App>/<contact>/      A chat from another app (WhatsApp, Telegram,
-                                    Discord, Instagram, Messenger, TikTok...),
-                                    brought in from that app's own export.
+                                    Discord, Instagram, Messenger, TikTok,
+                                    Snapchat...), brought in from that app's
+                                    own export.
   messages.json                     The chat, machine readable, including each
                                     app's message IDs and the exact times.
   progress.json                     How far the backup has got, the evidence that it
@@ -809,7 +1224,7 @@ conversations/<App>/<contact>/      A chat from another app (WhatsApp, Telegram,
 To add new text messages later, open messages.google.com and use the
 extension: "Back up this chat", the backup list, or "Back up everything" in
 its Settings. To add another app's chats, export them from that app and use
-Settings -> Tools -> "Bring in from another app".
+Settings -> Tools -> "Bring in files...".
 
 Timestamps
   timestamp            Normalised to your local time, "YYYY-MM-DD HH:MM".
@@ -827,7 +1242,9 @@ thumbnail. RCS photos are full size; SMS/MMS photos are compressed by the carrie
     SETTINGS_VERSION, SETTINGS_DEFAULTS, normalizeSettings,
     RESTORE_FORMAT, RESTORE_VERSION, tarHeader, tarPadding, tarEnd,
     phoneDigits, restoreAddrs, formatNumber, isNumberName, chatOrder, isFavourite, phoneKey, readPackage, phoneChat, phoneRowFor, useLibraryNames, phoneSlots, claimPhone, phoneClaims, unknownPhone,
-    SERVICES, serviceOf, serviceLabel, chatFolder, importedRecord,
+    SERVICES, addModule, modules, module: moduleOf, serviceOf, serviceLabel, appFolder, chatFolder, importedRecord, pageFiles, accountKey, accountOf, sameAccount, accountLabel,
+    PEOPLE_VERSION, chatKey, isGroupChat, isPersonChat, personIds, personName, nameKey, people, peopleSaved, joinPeople, keepApart, splitChat, renamePerson,
+    CHAT_KINDS, TRAITS_VERSION, chatTraits, traitsCurrent, senderOf, chatKind, chatKindFor, skipKinds,
     INDEX_VERSION, sigOf, keyOf, unknownIn, mergeChrono, imageFingerprint, sameImage, betterCopy,
     MEDIA_STATUS, mediaStatus, mediaIndex, mediaCounts, mediaIndexCsv,
     compactMessages, chatScript, contactSummary, chatCsv, joinCsv,

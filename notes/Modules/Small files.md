@@ -18,6 +18,7 @@ MV3. Permissions: `activeTab`, `scripting`, `storage`, `unlimitedStorage`, `down
 |---|---|
 | `check.mjs` (`npm run check`) | manifest valid and MV3, versions match `package.json`, every referenced file exists, no inline `<script>` in pages, `node --check` on every script |
 | `package.mjs` (`npm run package`) | check, then zip `extension/` (no dotfiles) plus LICENSE and NOTICE into `dist/`, prints SHA-256 |
+| `code-map.mjs` (`npm run code-map`) | rewrites `notes/Code map.canvas`, the map of every feature, file, section and function; `--check` only says whether it's out of date (`npm run check` warns when it is). See [[Code map]] |
 | `set-version.mjs` | `npm run set-version -- 0.0.2.0`: writes the version into `package.json`, `manifest.json` and the Android app (`versionName`, and `versionCode` = P·1,000,000 + M·10,000 + m·100 + p) |
 
 ## `.github/`

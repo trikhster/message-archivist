@@ -23,8 +23,9 @@ async function send(msg) {
   try {
     return await chrome.tabs.sendMessage(tab.id, msg);
   } catch {
-    // The tab was open before the extension was installed or reloaded; inject it now.
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['zip.js', 'library.js', 'content.js'] });
+    // The tab was open before the extension was installed or reloaded; inject
+    // it now, with every file the manifest gives the content script.
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: chrome.runtime.getManifest().content_scripts[0].js });
     return chrome.tabs.sendMessage(tab.id, msg);
   }
 }

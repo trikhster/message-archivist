@@ -155,6 +155,22 @@ for (const [k, c] of chats.entries()) {
   const got = await p2.threadLines(p2.manifest.threads[0]);
   check('version 2: a chat in pieces reads whole, in order', got.map((l) => l.text).join('|') === 'piece message 1|piece message 2|piece message 3');
 }
+// The Android app gzips a chat's files (format version 3); an older plain piece may come first.
+{
+  const { gzipSync } = await import('node:zlib');
+  const parts3 = [];
+  const add = (name, buf) => parts3.push(G.tarHeader(name, buf.length), buf, G.tarPadding(buf.length));
+  const line = (i) => JSON.stringify({ date: T0 + i * 60e3, box: 1, kind: 'sms', addrs: ['+15550100001'], from: '+15550100001', text: `zipped message ${i}` });
+  add('threads/0001.ndjson', Buffer.from(`${line(1)}\n`));
+  add('threads/0001.2.ndjson.gz', gzipSync(Buffer.from(`${line(2)}\n${line(3)}\n`)));
+  add('manifest.json', Buffer.from(JSON.stringify({ format: G.RESTORE_FORMAT, version: 3, source: 'phone', threads: [{ file: 'threads/0001.ndjson', files: ['threads/0001.ndjson', 'threads/0001.2.ndjson.gz'], title: 'Alex Test', addresses: ['+15550100001'], messages: 3 }] })));
+  parts3.push(G.tarEnd());
+  const p3 = await G.readPackage(new Blob(parts3));
+  const got = await p3.threadLines(p3.manifest.threads[0]);
+  check('version 3: gzipped pieces read whole, in order', got.map((l) => l.text).join('|') === 'zipped message 1|zipped message 2|zipped message 3');
+  const v4 = [G.tarHeader('manifest.json', 40), Buffer.from(JSON.stringify({ format: G.RESTORE_FORMAT, version: 4 }).padEnd(40)), G.tarPadding(40), G.tarEnd()];
+  check('a newer version is refused', await G.readPackage(new Blob(v4)).then(() => false, (e) => /newer version/.test(e.message)));
+}
 // How chats and numbers are shown: favourites, names A–Z, numbers last; numbers one way.
 check('numbers shown one way', G.formatNumber('+15550100001') === '(555) 010-0001' && G.formatNumber('5550100001, +15550100002') === '(555) 010-0001, (555) 010-0002' && G.formatNumber('72975') === '72975' && G.formatNumber('Robin') === 'Robin');
 {

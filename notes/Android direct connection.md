@@ -13,7 +13,7 @@ updated: 2026-10-26
 - Writing our own Android helper app (installed with ADB, then queried) would duplicate SMS Backup & Restore, need SMS permissions that Android restricts, and need distribution outside the Play Store.
 
 ## What was decided (2026-10-26)
-The owner chose to **build our own Android app** instead of relying on SMS Backup & Restore: [[Android app]], restoring from our own [[Restore package]]. Restore first; then (0.5.0.0) the same app backs a phone up too, with `READ_SMS` alone (no SMS role needed), into the same format. The extension brings that file into its library (Settings → Tools → Bring in a phone backup…): the fast first backup described below.
+The owner chose to **build our own Android app** instead of relying on SMS Backup & Restore: [[Android app]], restoring from our own [[Restore package]]. Restore first; then (0.5.0.0) the same app backs a phone up too, with `READ_SMS` alone (no SMS role needed), into the same format. The extension brings that file into its library (Settings → Tools → Bring in files…): the fast first backup described below.
 
 ## Original recommendation
 Don't connect to the phone directly. Instead, **import SMS Backup & Restore's XML** into the library:

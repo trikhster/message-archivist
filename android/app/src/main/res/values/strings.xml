@@ -2,17 +2,15 @@
 <resources>
     <string name="app_name">Message Archivist</string>
 
-    <!-- Welcome -->
+    <!-- Welcome: one section per app; Google Messages is the first -->
+    <string name="gm_title">Google Messages</string>
+    <string name="gm_sub">Texts, picture messages and chats on this phone</string>
     <string name="restore_card">Restore a backup</string>
+    <string name="restore_card_text">Put a backup from this app or the Chrome extension back on this phone. You see what’s in it first.</string>
     <string name="backup_card">Back up this phone</string>
-    <string name="backup_card_text">Saves every text and picture message on this phone to one file, on the phone or Google Drive, in minutes. It can keep that file up to date by itself, as often as every hour, and your computer backup can start from it.</string>
-    <string name="step1">Have a backup file</string>
-    <string name="step1_text">One made here with Back up this phone, or from the extension: Settings → Phone restore → Make the restore file.</string>
-    <string name="step2">Copy it to this phone</string>
-    <string name="step2_text">With a USB cable, Google Drive, or however you usually move files.</string>
-    <string name="step3">Choose it here</string>
-    <string name="step3_text">You’ll see what’s in it before anything on the phone changes.</string>
-    <string name="choose">Choose restore file</string>
+    <string name="backup_another">Back up to another file</string>
+    <string name="backup_another_text">A copy of everything in a file of its own, to keep or share.</string>
+    <string name="not_a_backup_title">Couldn’t open that file</string>
     <string name="choose_other">Choose another file</string>
     <string name="reading_file">Reading the restore file…</string>
     <string name="counting">Counting this phone’s messages…</string>
@@ -28,7 +26,11 @@
     <string name="n_hours">%1$s hours</string>
     <string name="chats_header">Chats to restore</string>
     <string name="select_all">Select all</string>
-    <string name="chat_line">%1$s messages · %2$s</string>
+    <string name="chat_line">%1$s · %2$s</string>
+    <plurals name="n_messages">
+        <item quantity="one">%1$s message</item>
+        <item quantity="other">%1$s messages</item>
+    </plurals>
     <string name="group">Group</string>
     <string name="sms_role_title">Message Archivist becomes your SMS app while it restores</string>
     <string name="sms_role_text">Android only lets the SMS app add messages. At the end you switch back to Google Messages. Texts that arrive meanwhile are kept, and Google Messages fetches picture messages afterwards. Nothing already on this phone is added twice.</string>
@@ -39,14 +41,13 @@
     <string name="none_selected">Choose at least one chat</string>
 
     <!-- Backup -->
-    <string name="phone_title">This phone</string>
-    <string name="phone_sub">All of it goes into one file you choose where to keep.</string>
+    <string name="phone_title">On this phone</string>
+    <string name="phone_sub">All of it goes into one file. Next you choose where: on this phone, or Google Drive so it’s safe if the phone isn’t.</string>
     <string name="backup_media">Include photos and videos</string>
     <string name="backup_media_text">The file is bigger, but it’s a complete copy.</string>
     <string name="backup_what_title">What’s in a backup</string>
     <string name="backup_what_text">Texts, picture messages and group chats, with their exact times. Chat (RCS) messages are in it as Google Messages keeps them on the phone; at the moment it doesn’t keep some you send, so those can be missing.</string>
     <string name="save_backup">Save backup</string>
-    <string name="back">Back</string>
     <string name="no_messages">There are no texts on this phone to back up.</string>
     <string name="needs_read_sms_title">Message Archivist can’t read your texts</string>
     <string name="needs_read_sms">To back them up it needs the SMS permission. Allow it in the app’s settings, then try again.</string>
@@ -57,17 +58,64 @@
     <string name="backup_done">Backup saved</string>
     <string name="backup_stopped">Backup stopped</string>
     <string name="backup_failed">Backup didn’t finish</string>
-    <string name="backup_done_sub">%1$s messages from %2$s chats, saved to “%3$s” (%4$s).</string>
+    <string name="backup_done_sub">Saved to “%1$s” (%2$s).</string>
     <string name="backup_stopped_sub">“%1$s” has the %2$s chats saved before you stopped. Back up again for all of them.</string>
     <string name="backup_media_failed">%1$s photos or videos couldn’t be read and were left out.</string>
     <string name="backup_line">%1$s messages from %2$s chats in “%3$s”.</string>
     <string name="backup_next_title">Next: your computer backup</string>
-    <string name="backup_next_text">Copy the file to your computer (or keep it on Google Drive), then in the Message Archivist extension for Chrome: Settings → Tools → Bring in a phone backup. From then on the extension keeps it up to date from Google Messages for Web, including chat messages the phone doesn’t keep. To put it back on a phone, open it here.</string>
+    <string name="backup_next_text">In the Message Archivist extension for Chrome, Settings → Tools → Bring in files… adds it to your archive. From then on the extension keeps it up to date from Google Messages for Web, with the chat messages a phone doesn’t keep.</string>
     <string name="update_existing">Update a backup instead…</string>
     <string name="update_existing_text">Pick a backup made before: only what’s new is added, such as today’s messages, or its photos if it was made without them.</string>
     <string name="backup_updated">Backup updated</string>
-    <string name="backup_updated_sub">%1$s new messages and %2$s photos added to “%3$s”, which now has %4$s messages from %5$s chats (%6$s).</string>
+    <string name="backup_updated_sub">%1$s new messages and %2$s photos added to “%3$s” (%4$s).</string>
+    <string name="backup_up_to_date">Already up to date</string>
+    <string name="backup_nothing_new_sub">Nothing new since the last backup of “%1$s” (%2$s).</string>
     <string name="update_line">%1$s new messages added to “%2$s”.</string>
+    <string name="backup_online_note">Google Drive uploads it in the background. Until it has, Drive shows it as 0 bytes; if that lasts, open the Drive app and check its uploads.</string>
+    <string name="backup_leaving_out">Leaving out %1$s (Settings).</string>
+    <string name="backup_left_out">Left out as codes, promotions or automated texts (Settings): %1$s chats.</string>
+    <string name="backup_chats">Chats</string>
+    <string name="backup_chats_all">All chats. Choose some to back up only those.</string>
+    <plurals name="backup_chats_some">
+        <item quantity="one">%1$s chat chosen</item>
+        <item quantity="other">%1$s chats chosen</item>
+    </plurals>
+    <string name="backup_chats_reset">Back up all chats instead</string>
+    <string name="phone_sub_chosen">The chats you chose go into one file. Next you choose where: on this phone, or Google Drive so it’s safe if the phone isn’t.</string>
+    <string name="update_existing_text_chosen">Pick a backup made before: the chats you chose are brought up to date in it, and its other chats stay as they were.</string>
+    <string name="choose_chats">Choose chats</string>
+    <string name="find_chat">Find a chat</string>
+    <string name="no_chat_found">No chat matches “%1$s”.</string>
+    <string name="no_chat_shown">No chats to show. Turn a type on above to see its chats.</string>
+    <string name="type_count">%1$s (%2$s)</string>
+    <string name="type_conversations">Conversations</string>
+    <string name="type_groups">Groups</string>
+    <string name="type_codes">Codes</string>
+    <string name="type_promos">Promotions &amp; spam</string>
+    <string name="type_automated">Automated</string>
+    <plurals name="choose_hidden">
+        <item quantity="one">%1$s chat hidden: it won’t be backed up.</item>
+        <item quantity="other">%1$s chats hidden: they won’t be backed up.</item>
+    </plurals>
+    <string name="sort_newest">Newest first</string>
+    <string name="sort_oldest">Oldest first</string>
+    <string name="sort_most">Most messages</string>
+    <string name="sort_fewest">Fewest messages</string>
+    <string name="sort_largest">Largest</string>
+    <string name="sort_smallest">Smallest</string>
+    <string name="sort_name">Name</string>
+    <plurals name="n_of_chats">
+        <item quantity="one">%1$s of %2$s chat</item>
+        <item quantity="other">%1$s of %2$s chats</item>
+    </plurals>
+    <plurals name="backup_chosen_new">
+        <item quantity="one">This backup has only the %1$s chat you chose.</item>
+        <item quantity="other">This backup has only the %1$s chats you chose.</item>
+    </plurals>
+    <plurals name="backup_chosen_updated">
+        <item quantity="one">Only the %1$s chat you chose was brought up to date. The file’s other chats are as they were.</item>
+        <item quantity="other">Only the %1$s chats you chose were brought up to date. The file’s other chats are as they were.</item>
+    </plurals>
     <string name="photos_waiting">Made without photos: %1$s photos and videos can be added later (Update a backup, with photos on).</string>
     <string name="daily_title">Back up automatically</string>
     <string name="daily_text">Keeps “%1$s” up to date %2$s, in the background, adding only what’s new. Change how often in Settings.</string>
@@ -95,16 +143,16 @@
     <string name="navigate_back">Back</string>
 
     <!-- Settings -->
-    <string name="s_auto">Automatic backup</string>
     <string name="s_auto_on">Back up by itself</string>
-    <string name="s_auto_on_text">Adds what’s new to your backup file, in the background.</string>
+    <string name="s_auto_on_text">Keeps one backup file up to date in the background, adding only what’s new.</string>
     <string name="s_auto_choose">Turning it on makes a backup now, then keeps it up to date. Where should it go?</string>
+    <string name="s_auto_change">Back up to another file from now on: a new one, backed up now, or one you have, brought up to date now.</string>
     <string name="s_new_file">New file…</string>
     <string name="s_existing_file">A backup I already have…</string>
     <string name="s_file">Backup file</string>
     <string name="s_change">Change</string>
     <string name="s_on_phone">On this phone</string>
-    <string name="s_online">Online (Google Drive or similar): sent whole each time</string>
+    <string name="s_online">Online (Google Drive or similar)</string>
     <string name="s_how_often">How often</string>
     <string name="s_every_1">Hour</string>
     <string name="s_every_6">6 hours</string>
@@ -118,6 +166,30 @@
     <string name="s_custom_range">From 1 hour to 30 days.</string>
     <string name="s_often_note">Android picks the exact time, when the battery isn’t low, and may wait longer to save battery, more so if the app hasn’t been opened for a while.</string>
     <string name="s_often_online">The file is online, so the whole file is uploaded each time: this often, with photos, can use a lot of data.</string>
+    <string name="s_online_title">Backup online</string>
+    <string name="s_contacts_title">Contacts</string>
+    <string name="s_contacts">Save all my contacts</string>
+    <string name="s_contacts_text">Every contact’s numbers, email addresses, work, birthday, labels and relations go into each backup, not only those you’ve texted, so your archive can tie chats from WhatsApp, Telegram and other apps to the right person. Never addresses or notes. Turn off to take them out at the next backup.</string>
+    <string name="s_leave_title">Leave out of phone backups</string>
+    <string name="s_leave_codes">Verification codes</string>
+    <string name="s_leave_codes_text">“123456 is your verification code”: one-time codes for signing in.</string>
+    <string name="s_leave_promos">Promotions and spam</string>
+    <string name="s_leave_promos_text">“Reply STOP to opt out”, and links from numbers you don’t know.</string>
+    <string name="s_leave_automated">Other automated texts</string>
+    <string name="s_leave_automated_text">Alerts, deliveries and reminders from short codes and business names.</string>
+    <string name="s_leave_note">Groups, starred contacts and chats you’ve talked in are always kept. A backup made before drops these chats the next time it’s brought up to date. The Message Archivist extension has the same choices for your archive.</string>
+    <string name="s_copy">Keep a copy on this phone</string>
+    <string name="s_copy_on">Each backup adds to this copy and uploads it, so the file online isn’t downloaded first. Uses %1$s on this phone; turn it off to free that.</string>
+    <string name="s_copy_next">Made at the next backup. Each backup then adds to it and uploads it, instead of downloading the file online first.</string>
+    <string name="s_copy_short">Not kept: this phone is short of space, so each backup downloads the file online first.</string>
+    <string name="s_copy_off">Each backup downloads the whole file online first, then deletes that copy.</string>
+    <string name="s_updates_title">Upload less: a small updates file</string>
+    <string name="s_updates_off_text">This backup is online, so every run uploads the whole file. With a small updates file beside it, runs upload only what’s new, and the big file catches up only when that’s worth it.</string>
+    <string name="s_updates_on_title">Updates file</string>
+    <string name="s_updates_on_text">New messages go into “%1$s”; “%2$s” catches up now and then. To restore or bring it into the extension, use the big file, then this one.</string>
+    <string name="s_updates_setup">Set up…</string>
+    <string name="s_updates_stop">Stop using</string>
+    <string name="updates_file_name">%1$s-updates.tar</string>
     <string name="s_ok">OK</string>
     <string name="s_cancel">Cancel</string>
     <string name="s_media">Include photos and videos</string>
@@ -182,7 +254,7 @@
     <string name="not_default">Message Archivist isn’t your SMS app, so Android won’t let it add messages.</string>
 
     <!-- Notifications -->
-    <string name="channel_progress">Restore progress</string>
+    <string name="channel_progress">Backup and restore progress</string>
     <string name="channel_alerts">Restore or backup finished, and texts that arrive during a restore</string>
     <string name="restore_done">Restore finished</string>
     <string name="restore_failed">Restore didn’t finish</string>
@@ -193,4 +265,37 @@
     <string name="incoming_mms_text">Google Messages fetches it once it’s your SMS app again. If it doesn’t appear, ask the sender to send it again.</string>
     <string name="cant_send_title">Message Archivist doesn’t send texts</string>
     <string name="cant_send">It only puts backups back on this phone. To send texts, make Google Messages your SMS app again.</string>
+
+    <!-- Other apps: exports shared to this app or added here, for the phone backup (Apps, Exports) -->
+    <string name="apps_note">What you share or add here goes into your next backup, by itself or by hand, and into your archive when you bring that backup in on your computer.</string>
+    <string name="app_none">Nothing added yet</string>
+    <plurals name="app_waiting">
+        <item quantity="one">%1$s waiting for your next backup</item>
+        <item quantity="other">%1$s waiting for your next backup</item>
+    </plurals>
+    <plurals name="app_in_backup">
+        <item quantity="one">%1$s in your backup</item>
+        <item quantity="other">%1$s in your backup</item>
+    </plurals>
+    <string name="app_whatsapp_how">In WhatsApp, open a chat, then ⋮ → More → Export chat, and pick Message Archivist. Include media to keep its photos.</string>
+    <string name="app_messenger_how">In Facebook: Accounts Center → Download your information, with Messages and the JSON format. When it’s ready, share the .zip to Message Archivist, or add it here. Encrypted chats need Messenger’s own download, on a computer.</string>
+    <string name="app_instagram_how">In Instagram: Accounts Center → Download your information, with Messages and the JSON format. When it’s ready, share the .zip to Message Archivist, or add it here.</string>
+    <string name="app_snapchat_how">In Snapchat: Settings → My Data, with your chats and Chat Media. When the email comes, share the .zip to Message Archivist, or add it here.</string>
+    <string name="app_tiktok_how">In TikTok: Settings and privacy → Account → Download your data, as JSON. When it’s ready, share the .zip to Message Archivist, or add it here.</string>
+    <string name="app_discord_how">In Discord: User Settings → Data &amp; Privacy → Request all of my data. When the email comes, share package.zip to Message Archivist, or add it here. It has only the messages you sent.</string>
+    <string name="app_add">Add a file…</string>
+    <string name="app_remove">Remove</string>
+    <string name="app_export_waiting">%1$s · waiting for your next backup</string>
+    <string name="app_export_in">In %1$s</string>
+    <string name="share_adding">Adding it to your phone backup…</string>
+    <string name="share_added_title">Added to your phone backup</string>
+    <string name="share_added_text">%1$s (%2$s) goes into your next backup, and into your archive with it.</string>
+    <string name="share_failed_title">Not added</string>
+    <string name="share_no_file">There’s nothing to add: share the export file itself (a .zip or .txt), not text.</string>
+    <string name="share_not_export">That doesn’t look like an export from WhatsApp, Messenger, Instagram, Snapchat, TikTok or Discord, so it wasn’t added.</string>
+    <string name="share_failed">It couldn’t be added: %1$s</string>
+    <plurals name="backup_exports_added">
+        <item quantity="one">%1$s chat export from another app went in too.</item>
+        <item quantity="other">%1$s chat exports from other apps went in too.</item>
+    </plurals>
 </resources>

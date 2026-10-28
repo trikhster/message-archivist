@@ -1686,7 +1686,7 @@
     if (!mediaOnly(opts)) {
       HUD.step(1, steps, 'reading the contact’s name, number and photo');
       const card = await captureContact(conv);
-      if (card) contact = await saveContact(card, folder, ctx);
+      if (card) contact = await saveContact(card, folder, ctx, contact);
     }
     mark('contact');
 
@@ -2180,7 +2180,11 @@
     }
   }
 
-  async function saveContact(card, folder, ctx) {
+  // `before`: the chat's card as saved. What a phone backup added to it (a
+  // starred contact, the rest of the phone's contact: `card`) stays, since
+  // the page doesn't show it; so does a photo the page no longer has.
+  async function saveContact(card, folder, ctx, before = null) {
+    const prev = new Map((before?.people || []).filter((p) => p.number).map((p) => [GMLib.phoneKey(p.number), p]));
     const people = [];
     for (const p of card.people) {
       let photo = null;
@@ -2188,7 +2192,8 @@
         photo = `contact/${safeName(p.name)}.png`;
         await ctx.sink.write(`${folder}/${photo}`, p.photo);
       }
-      people.push({ name: p.name, number: p.number || null, photo });
+      const o = p.number ? prev.get(GMLib.phoneKey(p.number)) : null;
+      people.push({ name: p.name, number: p.number || null, photo: photo || o?.photo || null, ...(o?.favorite ? { favorite: true } : {}), ...(o?.card ? { card: o.card } : {}) });
     }
     const contact = { captured_at: new Date().toISOString(), end_to_end_encrypted: card.e2ee, people };
     await ctx.sink.write(`${folder}/contact.json`, JSON.stringify(contact, null, 2));
@@ -2434,7 +2439,8 @@
   const findEntry = (lib, conv) => {
     const num = GMLib.restoreAddrs(null, conv.title)[0];
     const sameNumber = (e) => { const n = GMLib.restoreAddrs(null, e.title)[0]; return !!num && !!n && GMLib.phoneKey(n) === GMLib.phoneKey(num); };
-    const texts = lib.entries.filter((e) => GMLib.serviceOf(e.row) === 'sms');
+    // Google Messages for Web is one phone: its chats are the main account's.
+    const texts = lib.entries.filter((e) => GMLib.serviceOf(e.row) === 'sms' && !e.row?.account);
     return texts.find((e) => e.id && e.id === conv.id) || texts.find((e) => !e.id && e.title === conv.title) || texts.find((e) => !e.id && sameNumber(e)) || null;
   };
 
@@ -2497,7 +2503,7 @@
     if (final || !(await sink.exists('index.html'))) {
       const viewer = await viewerFiles();
       await sink.write('index.html', viewer['viewer.html']);
-      for (const f of ['viewer.js', 'theme.js', 'theme.css']) await sink.write(f, viewer[f]);
+      for (const [f, text] of Object.entries(viewer)) if (f !== 'viewer.html') await sink.write(f, text);
       await sink.write('README.txt', GMLib.README);
     }
     if (final) {
@@ -2519,6 +2525,20 @@
       const v = verification.summary;
       HUD.log(`✓ wrote index.html, data.js, messages.csv, verification.json, export-info.json`, 'ok');
       HUD.log(`Library: ${plural(v.chats, 'chat')} · ${nf(v.verified + v.complete)} complete${v.verified ? ` (${nf(v.verified)} verified)` : ''}${v.incomplete ? ` · ${nf(v.incomplete)} unfinished` : ''}${v.problem ? ` · ${nf(v.problem)} need attention` : ''}`, v.incomplete || v.problem ? 'warn' : 'ok');
+      // Notes for Obsidian (Settings → Tools → Obsidian), when they're on: only
+      // the chats this run changed are read again. Not in the checksums. Only
+      // in the backup folder (a date-range zip can't be read back).
+      if (settings.obsidian && sink.readText && sink.writeTemp) {
+        try {
+          HUD.phase('Updating your Obsidian notes…');
+          const json = async (p) => JSON.parse((await readText(sink, p)) || 'null');
+          const r = await GMObsidian.update({ readText: (p) => readText(sink, p), write: (p, d) => sink.writeTemp(p, d), remove: (p) => sink.call('remove', { path: p }) },
+            { rows, saved: await json('people.json'), labels: await json('labels.json'), book: await json('contacts.json') });
+          HUD.log(`✓ Obsidian notes: ${nf(r.written)} written, ${nf(r.same)} unchanged${r.removed ? `, ${nf(r.removed)} removed` : ''}`, 'ok');
+        } catch (e) {
+          HUD.log(`Obsidian notes not updated: ${e.message}`, 'warn');
+        }
+      }
       if (v.coverage) HUD.log(`Coverage: ${nf(v.coverage.backed_up)} of the ${nf(v.coverage.in_messages)} conversations in Messages are completely backed up${v.coverage.not_backed_up ? `; ${nf(v.coverage.not_backed_up)} not backed up yet` : ''}${v.coverage.unfinished ? `; ${nf(v.coverage.unfinished)} unfinished` : ''}`, v.coverage.backed_up === v.coverage.in_messages ? 'ok' : 'warn');
       const header = [
         `Message Archivist ${info.version} — ${run.kind}`,
@@ -2777,7 +2797,8 @@
       let existing = null;
       try { existing = JSON.parse((await readText(sink, `${folder}/messages.json`)) || 'null'); } catch { /* unreadable: use another folder */ continue; }
       if (existing && existing.conversation_id !== conv.id) continue;
-      const entry = { id: conv.id, title: conv.title, folder, data: existing };
+      // `fresh`: this run made the folder (nothing was there before it).
+      const entry = { id: conv.id, title: conv.title, folder, data: existing, fresh: !existing };
       if (existing) HUD.log(`  found an unfinished backup in ${folder}/; carrying on`, 'warn');
       entries.push(entry);
       return entry;
@@ -2813,17 +2834,43 @@
       const sink = await backupSink(true);
       if (!sink) return finishRun('total backup', target, { ok: false, cancelled: true, summary: NO_FOLDER });
       const writeState = (lib) => sink.write('backup-state.json', JSON.stringify(lib.state, null, 2));
+      // Codes, promotions or automated texts Settings leaves out (GMLib.chatKind):
+      // a chat already in the archive is judged by what it holds, without
+      // opening it; a new one once it's read (afterChat).
+      const skip = GMLib.skipKinds(settings);
+      let labels = null;
+      if (skip.size) { try { labels = JSON.parse((await readText(sink, 'labels.json')) || 'null'); } catch { /* none */ } }
+      const kindOf = async (row) => {
+        if (!row || GMLib.senderOf(row) === 'group') return null;
+        // Traits missing (a row from before the index kept them) or counted by older
+        // rules: counted again from the chat, and kept on the row for the index.
+        let traits = GMLib.traitsCurrent(row.traits) ? row.traits : null;
+        if (!traits) { try { traits = row.traits = GMLib.chatTraits(JSON.parse((await readText(sink, `${row.folder}/messages.json`)) || 'null')?.messages); } catch { return null; } }
+        return GMLib.chatKindFor(row, labels, traits);
+      };
       try {
         const result = await folderRun(sink, async (lib) => {
           const byId = new Map(lib.entries.filter((e) => e.id).map((e) => [e.id, e]));
           const prev = lib.state?.run;
           const resuming = !!prev && !prev.finished_at && !prev.limited && limit === Infinity;
           const doneBefore = new Set(resuming ? prev.done : []);
-          // Chats deleted from the backup with "don't back it up again".
-          const excluded = new Set((lib.state?.excluded || []).map((e) => e.id));
+          // Chats deleted from the backup with "don't back it up again", and
+          // those left out as codes, promotions or automated texts while that's
+          // still what Settings leaves out (turned off, they're backed up again).
+          const reasons = new Map((lib.state?.excluded || []).map((e) => [e.id, e.reason || null]));
+          const excluded = new Set([...reasons].filter(([, why]) => !why || skip.has(why)).map(([id]) => id));
           const leftOut = found.filter((c) => excluded.has(c.id));
-          if (leftOut.length) HUD.log(`Leaving out ${plural(leftOut.length, 'chat')} you deleted from the backup: ${leftOut.map((c) => c.name).join(', ')}`);
-          const todo = found.filter((c) => !doneBefore.has(c.id) && !excluded.has(c.id));
+          const deleted = leftOut.filter((c) => !reasons.get(c.id));
+          if (deleted.length) HUD.log(`Leaving out ${plural(deleted.length, 'chat')} you deleted from the backup: ${deleted.map((c) => c.name).join(', ')}`);
+          if (deleted.length < leftOut.length) HUD.log(`Leaving out ${plural(leftOut.length - deleted.length, 'chat')} of codes, promotions or automated texts, as before (Settings → Leave out of your archive)`);
+          let todo = found.filter((c) => !doneBefore.has(c.id) && !excluded.has(c.id));
+          if (skip.size) {
+            HUD.phase('Checking for codes, promotions and automated texts…');
+            const kinds = new Map();
+            for (const c of todo) { const k = await kindOf(byId.get(c.id)?.row); if (k && skip.has(k)) kinds.set(c, k); }
+            if (kinds.size) HUD.log(`Leaving out ${plural(kinds.size, 'chat')} of ${[...new Set(kinds.values())].map((k) => GMLib.CHAT_KINDS[k].toLowerCase()).join(', ')} (Settings → Leave out of your archive): ${[...kinds.keys()].map((c) => c.name).join(', ')}`);
+            todo = todo.filter((c) => !kinds.has(c));
+          }
           const fresh = todo.filter((c) => !byId.has(c.id)).length;
           const unfinished = todo.filter((c) => ['incomplete', 'problem'].includes(byId.get(c.id)?.row?.status)).length;
           const before = todo.length - fresh - unfinished;
@@ -2852,9 +2899,20 @@
           return todo;
         }, opts, 'total backup', {
           // A chat stopped part-way isn't done: carrying on starts with it.
-          afterChat: async (r, _entry, lib) => {
+          afterChat: async (r, entry, lib) => {
             if (cancelled) return;
             if (!lib.state.run.done.includes(r.id)) lib.state.run.done.push(r.id);
+            // New to the archive, and one Settings leaves out: its folder (made by
+            // this run) goes again, and it's left out next time too.
+            if (skip.size && entry?.fresh && entry.data) {
+              const kind = GMLib.chatKindFor({ id: entry.id, folder: entry.folder, title: entry.title, contact: entry.data.contact, group: entry.data.group }, labels, GMLib.chatTraits(entry.data.messages));
+              if (kind && skip.has(kind)) {
+                await sink.remove(entry.folder);
+                lib.entries.splice(lib.entries.indexOf(entry), 1);
+                lib.state.excluded = [...(lib.state.excluded || []).filter((x) => x.id !== entry.id), { id: entry.id, title: entry.title, at: new Date().toISOString(), reason: kind }];
+                HUD.log(`  – left out: ${GMLib.CHAT_KINDS[kind].toLowerCase()} (Settings → Leave out of your archive)`, 'warn');
+              }
+            }
             await writeState(lib);
           },
           beforeIndex: async (lib) => {
@@ -3080,15 +3138,19 @@
 
   // The archive viewer (viewer.html + viewer.js, shipped with the extension)
   // becomes the library's index.html. It reads data.js and each chat's
-  // chat.js, so it works offline straight from the folder, with no server.
+  // chat.js, so it works offline straight from the folder, with no server;
+  // library.js gives it GMLib's people and number helpers, and modules/ how
+  // each app shows. Every file viewer.html loads comes along (GMLib.pageFiles).
   async function viewerFiles() {
-    const files = ['viewer.html', 'viewer.js', 'theme.js', 'theme.css'];
-    const texts = await Promise.all(files.map(async (f) => {
+    const get = async (f) => {
       const res = await fetch(chrome.runtime.getURL(f));
       if (!res.ok) throw new Error('Could not load the archive viewer from the extension.');
       return res.text();
-    }));
-    return Object.fromEntries(files.map((f, i) => [f, texts[i]]));
+    };
+    const html = await get('viewer.html');
+    const files = GMLib.pageFiles(html);
+    const texts = await Promise.all(files.map(get));
+    return { 'viewer.html': html, ...Object.fromEntries(files.map((f, i) => [f, texts[i]])) };
   }
 
   // ---------- diagnostics (structure only, text masked) ----------

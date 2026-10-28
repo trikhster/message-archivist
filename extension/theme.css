@@ -195,3 +195,7 @@ details[open] > :not(summary) { animation: gm-fade var(--dur-2) var(--ease) both
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
 }
+
+/* In the app (app/app.js marks <html class="app">), what only the extension
+   can do is hidden, and the app's own words show instead. */
+html.app .ext-only, html:not(.app) .app-only { display: none !important; }

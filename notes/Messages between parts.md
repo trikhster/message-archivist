@@ -39,10 +39,11 @@ Sent with `chrome.runtime.sendMessage`.
 | `gm-own-window` | content | | moves the tab into its own window, and with `compactWindow` shrinks it into a corner; replies `{ moved, windowId, compact }` |
 | `gm-restore-window` | content (`finishRun`) | | gives a window that was shrunk for the backup its size back (only one that existed before the backup) |
 | `gm-keep-visible` | content | | un-minimises that window |
-| `gm-open-backup` | content, popup, options | `{ hash? }` | opens `viewer.html?library=1#hash` (hash checked against `^[\w/%.-]*$`) |
+| `gm-open-backup` | content, popup, options | `{ hash? }` | opens `options.html#archive/hash`, Settings' Archive tab (hash checked against `^[\w/%.-]*$`) |
 | `gm-open-messages` | popup, options | | focuses or opens Google Messages |
 | `gm-open-settings` | content, viewer | `{ hash? }` | opens `options.html#hash` (`folder`, `welcome`, `delete:<folder>`) |
 | `gm-clear-badge` | popup | | |
+| `gm-web-capture` | an app's web page reader (`web/snapchat.js`) | `{ service, chat: { id, title, people, group }, items[] }` | keeps what it read of the open chat in `webcap:<service>:<chat id>` (only from that app's own pages; keys in `webdone` skipped); replies `{ ok }` |
 
 ## Inside the page
 - `gm-writer-init`: `postMessage` from the content script to the writer frame, carrying a `MessageChannel` port. After that the port carries `{ id, op, args }` → `{ id, ok, result | error, name }`. Ops: `status`, `exists`, `readText`, `write`, `remove`, `list`, `ask`, and from 0.5.0.0 `joinCsv` and `fetch`. See [[Writer frame]].

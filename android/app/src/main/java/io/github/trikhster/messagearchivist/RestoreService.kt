@@ -135,6 +135,10 @@ class RestoreService : Service() {
         val path = intent.getStringExtra(EXTRA_BACKUP_PATH)
         val withMedia = intent.getBooleanExtra(EXTRA_MEDIA, true)
         val update = intent.getBooleanExtra(EXTRA_UPDATE, false)
+        // The chats chosen on screen (none: every chat).
+        val only = intent.getStringArrayExtra(EXTRA_ONLY)?.toSet()
+        // "Back up now" of the automatic backup: the same run as the job's (Daily.run).
+        val auto = intent.getBooleanExtra(EXTRA_AUTO, false).let { if (it) Daily.setup(this)?.takeIf { s -> s.uri == uri } else null }
         RestoreState.apply {
             running = true; starting = false; backingUp = true; startedAt = System.currentTimeMillis(); done = 0; total = 0; thread = ""
             chats = 0; media = 0; left = -1.0; backup = null; error = null; stop = false; backupName = intent.getStringExtra(EXTRA_NAME) ?: path?.substringAfterLast('/')
@@ -145,19 +149,27 @@ class RestoreService : Service() {
             try {
                 val nm = getSystemService(NotificationManager::class.java)
                 var lastNote = 0L
-                val r = BackupFiles.run(this, uri, path, update, withMedia, { p ->
+                val progress = { p: PhoneBackup.Progress ->
                     RestoreState.apply { done = p.done; total = p.total; thread = shown(p.thread); chats = p.chats; media = p.media; left = p.secondsLeft ?: -1.0 }
                     val now = System.currentTimeMillis()
                     if (now - lastNote > 1000) { lastNote = now; nm.notify(ID, progressNotification(this, p.done, p.total, shown(p.thread), backup = true)) }
-                }, { RestoreState.stop })
+                }
+                val r = if (auto != null) Daily.run(this, auto, progress) { RestoreState.stop }.also { ran ->
+                    // Only the updates file was written: that's the file the result is about.
+                    if (ran.updatesOnly) RestoreState.backupName = auto.updatesName
+                }.result else BackupFiles.run(this, uri, path, update, withMedia, only, progress) { RestoreState.stop }
                 RestoreState.backup = r
-                Log.i(TAG, "backed up chats=${r.threads} sms=${r.sms} mms=${r.mms} media=${r.media} waiting=${r.mediaWaiting} failedMedia=${r.failedMedia} bytes=${r.bytes} added=${r.added} mediaAdded=${r.mediaAdded} updated=${r.updated} stopped=${r.stopped}")
-                // The daily backup of this file counts this run as today's.
-                if (uri != null && Daily.setup(this)?.uri == uri) Daily.record(this, r.added, null)
+                Log.i(TAG, "backed up chats=${r.threads} sms=${r.sms} mms=${r.mms} media=${r.media} waiting=${r.mediaWaiting} failedMedia=${r.failedMedia} bytes=${r.bytes} added=${r.added} mediaAdded=${r.mediaAdded} updated=${r.updated} stopped=${r.stopped} leftOut=${r.leftOut} chosen=${r.chosen}")
+                // The daily backup of this file counts this run as today's (not one of only some chats).
+                if (uri != null && only == null && Daily.setup(this)?.uri == uri) Daily.record(this, r.added, null)
             } catch (e: Exception) {
-                RestoreState.error = e.message ?: e.toString()
+                val why = BackupFiles.why(this, e)
+                RestoreState.error = why
                 Log.e(TAG, "backup failed", e)
-                if (uri != null && !update) try { DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) { /* nothing to tidy */ }
+                // The automatic backup's file: the failure is its last run (the first
+                // screen says so, not the run before that worked), and the file stays.
+                if (uri != null && only == null && Daily.setup(this)?.uri == uri) Daily.record(this, 0, why)
+                else if (uri != null && !update) try { DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) { /* nothing to tidy */ }
             } finally {
                 lock.release()
                 RestoreState.running = false
@@ -179,6 +191,8 @@ class RestoreService : Service() {
         const val EXTRA_NAME = "file_name"
         const val EXTRA_BACKUP_PATH = "backup_path"
         const val EXTRA_UPDATE = "update"
+        const val EXTRA_AUTO = "auto"
+        const val EXTRA_ONLY = "only_chats"
         private const val ID = 1
 
         /**

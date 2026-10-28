@@ -1,0 +1,25 @@
+{
+  "id": "/message-archivist/app/",
+  "name": "Message Archivist",
+  "short_name": "Archivist",
+  "description": "Your archive of texts and chats from every app: read, search and keep it, on your own computer.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafd",
+  "theme_color": "#f8fafd",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Contacts", "url": "./#archive/contacts", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Bring in files", "url": "./#tools", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ],
+  "file_handlers": [
+    { "action": "./", "accept": { "application/x-tar": [".tar"] } }
+  ],
+  "launch_handler": { "client_mode": ["focus-existing", "auto"] }
+}

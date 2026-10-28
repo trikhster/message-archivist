@@ -34,6 +34,8 @@
 
   apply(saved());
   mq.addEventListener('change', () => { if (!saved()) apply(null); });
+  // Changed in another page of this origin (Settings around the archive's frame, another window).
+  addEventListener('storage', (e) => { if (e.key === KEY) apply(e.newValue); });
 
   window.GMTheme = {
     effective,

@@ -15,7 +15,7 @@ What happens when someone clicks **Back up this chat**. Other starts ("Back up e
 ## 2. folderRun(sink, pickTargets, opts, kind)
 - `openLibrary()` reads `data.js` (via `GMLib.readLibrary`, which migrates old formats) and `backup-state.json`.
 - For each target: open the chat (`openConversation()` using `chatLinks()`), find or create its entry (`findEntry` / `adoptOrCreate`), run `backupConversation()`, then `writeIndex(sink, lib, run, false)` between chats so a stopped run leaves a usable library.
-- At the end: `writeIndex(..., true)` writes the viewer, the library's messages.csv (only if a chat changed, joined by the writer frame), `verification.json`, the run log and `SHA256SUMS.txt`, and returns a summary with `perChat` results.
+- At the end: `writeIndex(..., true)` writes the viewer (with `library.js`), the library's messages.csv (only if a chat changed, joined by the writer frame), `verification.json`, the Obsidian notes when they're on ([[Obsidian notes]]: only changed chats are read; written with `writeTemp`, so not in the checksums), the run log and `SHA256SUMS.txt`, and returns a summary with `perChat` results.
 
 ## 3. backupConversation(conv, opts, ctx, entry)
 1. **Load** the saved chat: `loadEntry()` reads `messages.json` and `progress.json` and replays any `journal/` pieces left by a run that stopped hard ("recovered N messages…").
@@ -49,6 +49,9 @@ What happens when someone clicks **Back up this chat**. Other starts ("Back up e
 
 ## "Back up everything"
 `runTotal()`: `listConversations()` scrolls the whole conversation list, writes `backup-state.json`, skips `excluded` and (when carrying on) `done` chats, and records each finished chat in `afterChat`. Speed run is offered here too. Coverage is computed from the list in `GMLib.verificationOf()`.
+
+### Codes, promotions and automated texts
+With any of Settings' **Leave out of your archive** on (`GMLib.skipKinds`), `runTotal()` judges each chat already in the archive by its row's `traits` (or, when it has none or they're from older rules, `GMLib.traitsCurrent`, its `messages.json`, counted again and kept on the row, so the index has them after the run) and the owner's `labels.json` (`chatKindFor`), and leaves those out without opening them; `excluded` entries with a `reason` are skipped only while that kind still is. A chat **new** to the archive can't be judged before it's read (the list shows only its name), so it's backed up, then judged in `afterChat`: if it's one to leave out, and this run made its folder (`entry.fresh`, set by `adoptOrCreate`; never a folder that was already there), the folder is removed, the entry dropped and the chat put on `excluded` with the reason. Single chats and the backup list are never filtered. See [[Sources]] → Kept apart.
 
 ## Messages that came from a phone backup
 A chat brought in from a phone backup (the Android app) has messages with no Google ID. `unknown(scraped)` matches a page message to one of them loosely (`GMLib.phoneClaims` / `claimPhone`: same side, within a minute either way, same text, or a photo for a photo-only message) after the usual ID and signature checks; the phone message **claims** that ID (`r.id`), so later runs match it by ID and its photos (if it was backed up without them) become targets like any saved message's. A phone message with a photo and a caption that the page shows as two messages is claimed by both halves: the second only if it brings the missing half, its ID kept in `also_ids` (and in `savedIds`). Page messages that match nothing (sent RCS messages the phone didn't store) are added as new. The run's debug log says how many were matched. `findEntry` also finds a chat with no Google ID by its number when both are named by one, however it's written.

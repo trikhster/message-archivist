@@ -10,9 +10,12 @@
   },
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node test/restore/import-phone.mjs extension/library.js && node test/importers/run.mjs",
+    "test": "node test/restore/import-phone.mjs extension/library.js && node test/importers/run.mjs && node test/people/run.mjs && node test/filters/run.mjs && node test/app/run.mjs",
     "package": "node scripts/check.mjs && node scripts/package.mjs",
-    "set-version": "node scripts/set-version.mjs"
+    "app": "node scripts/build-app.mjs",
+    "serve-app": "node scripts/build-app.mjs && node scripts/serve-app.mjs",
+    "set-version": "node scripts/set-version.mjs",
+    "code-map": "node scripts/code-map.mjs"
   },
   "homepage": "https://github.com/trikhster/message-archivist#readme",
   "repository": {

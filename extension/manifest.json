@@ -27,7 +27,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Export Google Messages",
+    "default_title": "Message Archivist",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -39,6 +39,8 @@
       "resources": [
         "viewer.html",
         "viewer.js",
+        "library.js",
+        "modules/*.js",
         "theme.js",
         "theme.css",
         "writer.html",
@@ -57,6 +59,15 @@
       "js": [
         "zip.js",
         "library.js",
+        "modules/whatsapp.js",
+        "modules/meta.js",
+        "modules/snapchat.js",
+        "modules/telegram.js",
+        "modules/discord.js",
+        "modules/tiktok.js",
+        "modules/imessage.js",
+        "modules/signal.js",
+        "obsidian.js",
         "content.js"
       ],
       "run_at": "document_idle"

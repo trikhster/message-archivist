@@ -1,6 +1,6 @@
 ---
 tags: [moc]
-updated: 2026-10-26
+updated: 2026-10-27
 version: 0.5.0.0
 ---
 # Message Archivist: developer notes
@@ -11,8 +11,10 @@ The user-facing docs live outside this vault: the user guide (`extension/README.
 
 ## Start here
 - [[Architecture]]: the parts and how they talk
+- [[Code map]]: a canvas of every feature, file and function, wired together (`Code map.canvas`, `npm run code-map`)
 - [[Backup run]]: what happens, step by step, when a chat is backed up
-- [[Sources]]: one archive for every app (text messages, WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok…)
+- [[Sources]]: one archive for every app (text messages, WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok, Snapchat…)
+- [[Desktop app]]: the plan for an app of its own that runs on Chrome or Edge, with iMessage through a native helper (Phase 1, the installable app, is built: [[App]])
 - [[Library format]]: every file in the backup folder
 - [[Restore package]]: the file the Android app restores from, and writes when it backs a phone up
 - [[Photo statuses and runs]]: the master list, speed runs, fetch and upgrade
@@ -28,7 +30,9 @@ The user-facing docs live outside this vault: the user guide (`extension/README.
 | Folder access frame | `writer.html`, `writer.js` | [[Writer frame]] |
 | Toolbar popup | `popup.html`, `popup.js` | [[Popup]] |
 | Settings page | `options.html`, `options.js` | [[Settings page]] |
-| Other apps' exports | `importers/` | [[Importers]] |
+| Each other app (a module per app) and importing its export | `modules/`, `import.js` | [[Importers]] |
+| Notes for Obsidian | `obsidian.js` | [[Obsidian notes]] |
+| The app (installed from GitHub Pages) | `app/`, `scripts/build-app.mjs` | [[App]] |
 | Offline viewer | `viewer.html`, `viewer.js` | [[Viewer]] |
 | Zip writer, theme, scripts | `zip.js`, `theme.*`, `scripts/` | [[Small files]] |
 | Android app | `android/` | [[Android app]] |
@@ -37,6 +41,7 @@ The user-facing docs live outside this vault: the user guide (`extension/README.
 - [[Messages between parts]]: every `gm-*` message
 - [[Storage and settings]]: chrome.storage, IndexedDB, localStorage, settings defaults
 - [[Google Messages page]]: selectors, and how to check them against the live page
+- [[Snapchat Web page]]: the same for Snapchat for Web, read as the owner reads it (`web/snapchat.js`)
 - [[Glossary]]
 
 ## Working on it

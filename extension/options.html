@@ -15,6 +15,15 @@
     .card { margin-bottom: 16px; padding: 20px 24px; border: 0; border-radius: 24px; }
     .card h2 { margin-bottom: 2px; }
     .card > .secondary { margin-bottom: 14px; display: block; font-size: 13px; line-height: 18px; }
+    /* Apps tab: a card per app module, its colour as a dot by its name. */
+    .app-card h2 { display: flex; align-items: center; gap: 10px; }
+    .app-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--app); flex: none; }
+    .app-card .app-steps { margin: 0 0 10px 18px; padding: 0; font-size: 13px; line-height: 19px; }
+    .app-card p.secondary { margin: 0 0 12px; font-size: 13px; line-height: 18px; }
+    /* An app's web page reader (Snapchat for Web): its switch, what it keeps, what's waiting. */
+    .app-card .web-read { margin: 0 0 14px; padding: 12px 14px; border-radius: 16px; background: var(--surface-1); }
+    .app-card .web-read label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+    .app-card .web-read p.secondary { margin: 0 0 8px; }
     #subfolder { width: 220px; }
     .sub-h { font-size: 15px; margin: 20px 0 2px; }
     .home-status { font-size: 15px; line-height: 22px; }
@@ -72,16 +81,56 @@
     #toast { position: fixed; bottom: 24px; left: 50%; translate: -50% 0; background: var(--tooltip); color: var(--on-tooltip); padding: 12px 16px; border-radius: 4px; box-shadow: var(--shadow-2); display: none; }
 
     /* 5.0: tabs, the backup index, basic/advanced settings */
-    header { position: sticky; top: 0; z-index: 5; background: var(--surface); }
-    nav.tabs { display: flex; gap: 4px; margin: 0 0 16px; padding: 4px; border-radius: 28px; background: var(--surface-1); overflow-x: auto; position: sticky; top: 72px; z-index: 5; }
-    nav.tabs button { flex: 1 0 auto; height: 40px; border-radius: 20px; padding: 0 18px; color: var(--text-2); transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }
-    nav.tabs button[aria-selected="true"] { background: var(--bg); color: var(--primary); box-shadow: var(--shadow-1); }
+    /* One menu down the left: the archive's views, then managing the backup. */
+    .shell { display: grid; grid-template-columns: 256px minmax(0, 1fr); min-height: 100vh; }
+    body.menu-ready .shell { transition: grid-template-columns var(--dur-2) var(--ease); } /* not when the page opens collapsed */
+    /* Set apart from what it opens: its own shade and a line down its edge. */
+    .rail { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; padding: 12px; overflow-x: hidden; overflow-y: auto; background: var(--surface-1); border-right: 1px solid var(--outline-variant); z-index: 5; }
+    .rail header { height: auto; gap: 10px; padding: 0 8px 8px 0; }
+    #menuBtn { flex: none; }
+    .rail header .logo { width: 36px; height: 36px; font-size: 20px; }
+    .rail header h1 { font-size: 17px; line-height: 22px; white-space: nowrap; }
+    .rail header .secondary { font-size: 11px; }
+    nav.tabs { display: flex; flex-direction: column; gap: 2px; }
+    nav.tabs .rail-h { padding: 14px 16px 6px; font: 500 12px/16px var(--font-display); color: var(--muted); }
+    nav.tabs button { display: flex; align-items: center; justify-content: flex-start; gap: 14px; width: 100%; height: 40px; flex: none; border-radius: 20px; padding: 0 16px; text-align: left; color: var(--text-2); font-weight: 500; transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }
+    nav.tabs button svg { width: 20px; height: 20px; flex: none; fill: currentColor; }
+    nav.tabs button:hover { background: var(--hover); }
+    nav.tabs button[aria-selected="true"] { background: var(--selected); color: var(--on-selected); }
+    .rail-foot { margin-top: auto; padding: 12px 4px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    /* Collapsed (the ☰ button, remembered): icons only, each with its name as a tooltip. */
+    body.menu-collapsed .shell { grid-template-columns: 72px minmax(0, 1fr); }
+    body.menu-collapsed .rail { padding: 12px 8px; }
+    body.menu-collapsed .rail header { padding: 0 0 8px; justify-content: center; }
+    body.menu-collapsed .rail header .logo, body.menu-collapsed .rail header .titles, body.menu-collapsed #maInstall { display: none; }
+    body.menu-collapsed nav.tabs .rail-h { font-size: 0; height: 1px; padding: 0; margin: 10px 8px; background: var(--outline-variant); }
+    body.menu-collapsed nav.tabs button { font-size: 0; gap: 0; padding: 0; width: 48px; margin: 0 auto; justify-content: center; position: relative; }
+    body.menu-collapsed nav.tabs .badge { position: absolute; top: 2px; right: 2px; margin: 0; }
+    body.menu-collapsed .rail-foot { justify-content: center; padding: 12px 0 0; }
+    main { max-width: none; margin: 0; padding: 16px 24px 64px; min-width: 0; }
+    main > .tab { max-width: 880px; margin: 0 auto; }
+    @media (max-width: 800px) {
+      .shell { display: block; }
+      .rail { height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 8px 12px 4px; overflow: visible; border-right: 0; border-bottom: 1px solid var(--outline-variant); }
+      .rail header { flex: 1; padding: 0; }
+      /* Narrow, collapsed is just the title bar: ☰ shows the menu's row again. */
+      body.menu-collapsed .rail { padding: 8px 12px; }
+      body.menu-collapsed .rail header { justify-content: flex-start; padding: 0; }
+      body.menu-collapsed .rail header .logo, body.menu-collapsed .rail header .titles { display: revert; }
+      body.menu-collapsed nav.tabs { display: none; }
+      .rail-foot { margin: 0; padding: 0; }
+      nav.tabs { order: 3; width: 100%; flex-direction: row; overflow-x: auto; scrollbar-width: none; padding: 6px 0 4px; }
+      nav.tabs .rail-h { padding: 0 2px 0 10px; align-self: center; white-space: nowrap; }
+      nav.tabs button { width: auto; gap: 8px; padding: 0 12px; white-space: nowrap; }
+      main { padding: 8px 16px 64px; }
+    }
     nav.tabs .badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: var(--error); color: var(--bg); font-size: 11px; }
     .tab[hidden] { display: none; }
     .tab:not([hidden]) > .card { animation: gm-rise var(--dur-3) var(--ease-out) both; }
     .tab:not([hidden]) > .card:nth-child(2) { animation-delay: 40ms; } .tab:not([hidden]) > .card:nth-child(3) { animation-delay: 80ms; } .tab:not([hidden]) > .card:nth-child(4) { animation-delay: 120ms; }
     .index-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 10px; }
     .index-tools input[type="search"] { flex: 1 1 220px; height: 40px; }
+    .index-tools select { height: 40px; }
     .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
     .chips button { height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--outline); color: var(--text-2); font-size: 13px; transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease); }
     .chips button[aria-pressed="true"] { background: var(--primary-container); color: var(--on-primary-container); border-color: transparent; }
@@ -93,7 +142,9 @@
     #index tr.chat-row:hover td { background: var(--surface-1); }
     #index tr.checks td { background: var(--surface-1); padding: 8px 12px 12px; animation: gm-fade var(--dur-2) var(--ease) both; }
     #index table { table-layout: auto; }
-    #index .c-chat { min-width: 160px; overflow-wrap: break-word; }
+    /* Names, handles and folder paths with no spaces wrap instead of pushing the table past the card. */
+    #index td { overflow-wrap: anywhere; }
+    #index .c-chat { min-width: 160px; }
     #index td.media-cell { min-width: 120px; }
     @media (max-width: 720px) { #index .media-cell { display: none; } }
     #index td select { width: 128px; }
@@ -130,43 +181,70 @@
     #deleteDlg[open] { animation: gm-pop var(--dur-3) var(--ease-out) both; }
     #deleteDlg[open]::backdrop { animation: gm-fade var(--dur-3) var(--ease) both; }
     .run pre:empty::before { content: 'Loading…'; color: var(--muted); }
+    /* The archive: the viewer, as wide and tall as the window allows beside the menu. */
+    body.archive-on main { padding: 0; }
+    main > #tab-archive { max-width: none; }
+    #archiveFrame { display: block; width: 100%; height: 100dvh; border: 0; background: var(--surface); }
+    @media (max-width: 800px) { #archiveFrame { height: calc(100dvh - 112px); } body.menu-collapsed #archiveFrame { height: calc(100dvh - 57px); } }
   </style>
 </head>
 <body>
-<main>
-  <header><span class="logo">💬</span><div class="titles"><h1>Message Archivist</h1><div class="secondary" id="version"></div></div><button class="icon" id="themeBtn"></button></header>
-  <nav class="tabs" role="tablist" aria-label="Settings sections">
-    <button role="tab" data-tab="home" aria-selected="true">Home</button>
-    <button role="tab" data-tab="backups">Backups<span class="badge" id="backupsBadge" hidden></span></button>
-    <button role="tab" data-tab="restore">Phone restore</button>
-    <button role="tab" data-tab="tools">Tools</button>
-    <button role="tab" data-tab="settings">Settings</button>
+<div class="shell">
+  <aside class="rail">
+  <header><button class="icon" id="menuBtn" aria-expanded="true" aria-controls="menu" title="Collapse the menu" aria-label="Collapse the menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button><span class="logo">💬</span><div class="titles"><h1>Message Archivist</h1><div class="secondary" id="version"></div></div></header>
+  <nav class="tabs" id="menu" aria-label="Message Archivist">
+    <div class="rail-h">Archive</div>
+    <button data-tab="archive" data-view="chats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z"/></svg>Chats</button>
+    <button data-tab="archive" data-view="people" title="Each person across apps and numbers"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 11a3 3 0 100-6 3 3 0 000 6zm-8 0a3 3 0 100-6 3 3 0 000 6zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05A4.22 4.22 0 0117 16.5V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>People</button>
+    <button data-tab="archive" data-view="contacts" title="Everyone, as a grid of circles"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3a3 3 0 110 6 3 3 0 010-6zm10 0a3 3 0 110 6 3 3 0 010-6zM7 13a3 3 0 110 6 3 3 0 010-6zm10 0a3 3 0 110 6 3 3 0 010-6z"/></svg>Contacts</button>
+    <button data-tab="archive" data-view="search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>Search</button>
+    <button data-tab="archive" data-view="media" title="Every photo and video"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z"/></svg>Media</button>
+    <button data-tab="archive" data-view="review" title="Flagged and labelled messages"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>Review</button>
+    <button data-tab="archive" data-view="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>Analysis</button>
+    <button data-tab="archive" data-view="about" title="What’s in this backup"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>About</button>
+    <div class="rail-h">Manage</div>
+    <button role="tab" data-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Home</button>
+    <button role="tab" data-tab="backups"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm-7 14H7v-2h5v2zm5-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>Backups<span class="badge" id="backupsBadge" hidden></span></button>
+    <button role="tab" data-tab="restore"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 1H7a2 2 0 00-2 2v18a2 2 0 002 2h10a2 2 0 002-2V3a2 2 0 00-2-2zm0 18H7V5h10v14z"/></svg>Phone restore</button>
+    <button role="tab" data-tab="tools"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>Tools</button>
+    <button role="tab" data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94a7.07 7.07 0 000-1.88l2.03-1.58a.5.5 0 00.12-.64l-1.92-3.32a.5.5 0 00-.6-.22l-2.39.96a7 7 0 00-1.63-.94l-.36-2.54a.5.5 0 00-.5-.42h-3.84a.5.5 0 00-.49.42l-.36 2.54c-.59.24-1.13.56-1.63.94l-2.39-.96a.5.5 0 00-.6.22L2.66 8.84a.5.5 0 00.12.64l2.03 1.58a7.07 7.07 0 000 1.88l-2.03 1.58a.5.5 0 00-.12.64l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.5.38 1.04.7 1.63.94l.36 2.54c.05.24.25.42.49.42h3.84c.24 0 .45-.18.49-.42l.36-2.54c.59-.24 1.13-.56 1.63-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 00-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z"/></svg>Settings</button>
+    <button role="tab" data-tab="apps" title="Google Messages and your other apps: how to bring each one in"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>Apps</button>
   </nav>
+  <div class="rail-foot"><button class="icon" id="themeBtn"></button></div>
+  </aside>
+<main>
+
+  <!-- ===================== Archive (the viewer, in this page) ===================== -->
+  <div class="tab" id="tab-archive" role="tabpanel" hidden>
+    <iframe id="archiveFrame" title="Your archive"></iframe>
+  </div>
 
   <!-- ===================== Home ===================== -->
   <div class="tab" id="tab-home" role="tabpanel">
     <section class="card welcome" id="welcome" hidden>
       <h2>Let’s set up your message backups</h2>
-      <span class="secondary">Your messages, saved on your own computer, ready to read here or put back on an Android phone. The quickest start is from your phone: years of texts in minutes. Then this extension keeps the backup up to date.</span>
+      <span class="secondary">Your messages, saved on your own computer, ready to read here or put back on an Android phone. The quickest start is from your phone: years of texts in minutes. <span class="ext-only">Then this extension keeps the backup up to date.</span><span class="app-only">Then the extension, Message Archivist for Chrome or Edge, can keep it up to date from Google Messages, in the same folder.</span></span>
       <ol class="steps">
-        <li id="step1"><b>Choose a folder for your backups.</b> We suggest making a new folder called “Messages Backup” in your Documents folder. Chrome will ask you to allow the extension to save there: choose <b>Allow</b>, or <b>Allow on every visit</b> if it offers that.
+        <li id="step1"><b>Choose a folder for your backups.</b> We suggest making a new folder called “Messages Backup” in your Documents folder. <span class="ext-only">Chrome will ask you to allow the extension to save there: choose <b>Allow</b>, or <b>Allow on every visit</b> if it offers that.</span><span class="app-only">If you already use the extension, choose the folder it saves to. Your browser asks you to allow the app to save there: choose <b>Allow on every visit</b> if it offers that.</span>
           <div class="detail"><button class="filled small" id="welcomeChoose">Choose a folder…</button> <span id="welcomeFolder" class="gray"></span></div></li>
         <li id="stepPhone"><b>Start with your phone (fastest).</b> On your Android phone, open the <b>Message Archivist</b> app, tap <b>Back up this phone</b> and save the file. It reads the phone’s own copy of your texts, so years of them take minutes instead of hours. Copy the file to this computer (or open it from Google Drive), then bring it in. <a href="https://github.com/trikhster/message-archivist/blob/main/extension/README.md#back-up-a-phone-with-the-android-app" target="_blank" rel="noopener">How to get the app</a>
-          <div class="detail"><button class="tonal small" id="welcomePhone">Bring in a phone backup…</button> <span class="gray">No Android phone to hand? Skip this; the next steps back everything up from Google Messages for Web instead, which takes longer.</span></div></li>
-        <li id="step2"><b>Open Google Messages and connect your phone.</b> On your phone, open Messages, tap your profile picture → <b>Device pairing</b> → <b>QR code scanner</b>, and scan the code shown in Chrome.
+          <div class="detail"><button class="tonal small" id="welcomePhone">Bring in a phone backup…</button> <span class="gray ext-only">No Android phone to hand? Skip this; the next steps back everything up from Google Messages for Web instead, which takes longer.</span><span class="gray app-only">No Android phone to hand? Back up from Google Messages for Web with the extension instead (the next step), which takes longer.</span></div></li>
+        <li id="step2" class="ext-only"><b>Open Google Messages and connect your phone.</b> On your phone, open Messages, tap your profile picture → <b>Device pairing</b> → <b>QR code scanner</b>, and scan the code shown in Chrome.
           <div class="detail"><button class="tonal small" id="welcomeMessages">Open Google Messages</button></div></li>
-        <li id="step3"><b>Back up everything from here once, then keep it up to date.</b> This fills in what the phone doesn’t keep (some chat messages you sent, during a Google Messages bug), contact cards and pictures, and matches the messages already brought in from the phone instead of saving them twice. After that, only new messages are added: by hand, or on a schedule (Backups tab). Google Messages moves into a small window in the corner of your screen while it works, so you can keep using your computer; just don’t minimise or cover it.
+        <li id="step3" class="ext-only"><b>Back up everything from here once, then keep it up to date.</b> This fills in what the phone doesn’t keep (some chat messages you sent, during a Google Messages bug), contact cards and pictures, and matches the messages already brought in from the phone instead of saving them twice. After that, only new messages are added: by hand, or on a schedule (Backups tab). Google Messages moves into a small window in the corner of your screen while it works, so you can keep using your computer; just don’t minimise or cover it.
           <div class="detail"><button class="tonal small" id="welcomeAll">Back up everything…</button></div></li>
+        <li id="stepExt" class="app-only"><b>Keep Google Messages backed up (optional).</b> Message Archivist for Chrome, the extension, backs up Google Messages for Web into the same folder, photos and all, and fills in what a phone backup can miss. Install it in Chrome or Edge from the <a href="https://github.com/trikhster/message-archivist/releases" target="_blank" rel="noopener">releases page</a>; this app shows what it saves.</li>
       </ol>
     </section>
 
     <section class="card" id="home">
       <h2>Your backups</h2>
       <div id="homeStatus" class="home-status"><div class="skeleton w60"></div><div class="skeleton w80"></div></div>
-      <div class="row" style="margin-top:12px"><button id="openBackup" class="filled">Open my backup</button><button id="totalRun" class="tonal">Back up everything…</button><button id="homeHealth" class="outlined">See every chat</button></div>
+      <div class="row" style="margin-top:12px"><button id="openBackup" class="filled">Open my backup</button><button id="totalRun" class="tonal ext-only">Back up everything…</button><button id="homeHealth" class="outlined">See every chat</button></div>
       <div class="secondary" id="totalMsg" style="margin-top:8px"></div>
       <div id="totalStatus" style="margin-top:10px"></div>
-      <div class="secondary" style="margin-top:6px">“Back up everything” goes through every conversation in Google Messages, one after another. Years of texts can take hours the first time, and your phone needs to stay on and connected; a phone backup from the Message Archivist app gets you there in minutes (Tools → Bring in a phone backup), and this then only adds what’s new. You can stop it any time; next time it carries on where it left off.</div>
+      <div class="secondary ext-only" style="margin-top:6px">“Back up everything” goes through every conversation in Google Messages, one after another. Years of texts can take hours the first time, and your phone needs to stay on and connected; a phone backup from the Message Archivist app gets you there in minutes (Tools → Bring in files…), and this then only adds what’s new. You can stop it any time; next time it carries on where it left off.</div>
+      <div class="secondary app-only" style="margin-top:6px">Backing up from Google Messages is done by the extension, Message Archivist for Chrome or Edge, into this same folder. Here you read and search your archive, bring in phone backups and other apps’ chats, and make files to put texts back on a phone.</div>
     </section>
   </div>
 
@@ -174,11 +252,12 @@
   <div class="tab" id="tab-backups" role="tabpanel" hidden>
     <section class="card">
       <h2>Every chat</h2>
-      <span class="secondary">Each chat in your backup or on your automatic backup list, how complete it is, and its photos. Click a chat for the details. Choose how often it’s backed up by itself in its row.</span>
+      <span class="secondary">Each chat in your backup or on your automatic backup list, how complete it is, and its photos. Click a chat for the details.<span class="ext-only"> Choose how often it’s backed up by itself in its row.</span></span>
       <div class="index-tools">
         <input type="search" id="indexFind" class="pill" placeholder="Find a chat">
-        <button id="runAll" class="tonal small" title="Backs up every chat set to back up by itself, now">Back up automatic chats now</button>
-        <button id="addChats" class="outlined small">Add chats…</button>
+        <select id="indexSort" title="Sort chats"><option value="name">Favorites, then A–Z</option><option value="recent">Most recent message</option><option value="count">Most messages</option></select>
+        <button id="runAll" class="tonal small ext-only" title="Backs up every chat set to back up by itself, now">Back up automatic chats now</button>
+        <button id="addChats" class="outlined small ext-only">Add chats…</button>
         <button id="indexRefresh" class="icon" title="Read the backup again" aria-label="Read the backup again"><svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z"/></svg></button>
       </div>
       <div id="addPanel" class="add-panel" hidden>
@@ -190,7 +269,7 @@
         <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="addCancel">Cancel</button><button id="addSelected" class="filled" disabled>Add selected</button></div>
       </div>
       <div class="chips" id="indexFilters" role="group" aria-label="Show"></div>
-      <div class="fixbar" id="indexFix"></div>
+      <div class="fixbar ext-only" id="indexFix"></div>
       <div class="secondary" id="indexMsg"></div>
       <div id="index"></div>
     </section>
@@ -201,6 +280,7 @@
     <section class="card">
       <h2>Put your texts back on an Android phone</h2>
       <span class="secondary">Makes one file with every chat that has a phone number, its messages in order, and its photos and videos. Copy it to the phone and open it with the <b>Message Archivist</b> app (part of this project): it puts the texts back into the phone’s messages, then hands back to Google Messages. Times are to the minute; messages sent in the same minute keep their order. RCS chats go back as ordinary texts and picture messages. iPhones can’t import texts.</span>
+      <div class="row" id="restoreAccountRow" hidden style="margin:8px 0"><label for="restoreAccount" class="secondary">Texts from</label> <select id="restoreAccount"></select></div>
       <div class="ready" id="restoreReady"><div class="skeleton"></div></div>
       <div id="restoreLeft"></div>
       <div class="check"><input type="checkbox" id="phoneMedia"><label for="phoneMedia">Include photos and videos <span class="secondary">(recommended; written a little at a time, so the size of years of photos isn’t a problem)</span></label></div>
@@ -214,24 +294,25 @@
 
   <!-- ===================== Tools ===================== -->
   <div class="tab" id="tab-tools" role="tabpanel" hidden>
+    <section class="card">
+      <h2>Bring in conversations</h2>
+      <span class="secondary">Add to your archive: a <b>phone backup</b> from the Message Archivist app (the .tar it saved, and its updates file if you use one), chats exported from <b>WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok or Snapchat</b>, or exports from earlier versions of this extension. Pick one or several; each is recognised by itself, and only what isn’t here yet is added. The files you pick aren’t changed.</span>
+      <div class="row"><button id="importAny" class="filled small">Bring in files…</button><button id="importAnyFolder" class="outlined small">Bring in a folder…</button></div>
+      <details style="margin-top:8px"><summary class="secondary">Where each file comes from</summary><ul id="importHow" class="secondary" style="margin:6px 0 0 18px;padding:0"></ul></details>
+      <div id="importMsg" class="secondary" style="margin-top:8px" role="status"></div>
+    </section>
+    <section class="card" id="obsidianCard">
+      <h2>Obsidian</h2>
+      <span class="secondary">Your archive as notes in <b>Obsidian</b>: one for every person and every chat, linked together, each person's with what you talk about (words and phrases), the moments and events of your chats and who they're connected to; a calendar of every day, the events found in your messages (birthdays, milestones, travel, meeting up), every photo by day, and the messages a year at a time with photos and videos shown where they were sent. They go in an <b>Obsidian</b> folder inside your backup folder, so they never leave your computer. In Obsidian, choose <b>Open folder as vault</b> and pick the backup folder itself. Anything you write below the “Your notes” line of a person or chat note is kept when the notes are updated.</span>
+      <div class="row"><button id="obsidianWrite" class="filled small">Write the notes</button><button id="obsidianDelete" class="outlined small" hidden>Delete the notes…</button></div>
+      <div class="check"><input type="checkbox" id="obsidian"><label for="obsidian">Keep them up to date after every backup and import <span class="secondary">(only the chats that changed are written again)</span><span class="secondary app-only"> In the app this is for what you bring in here; backups from Google Messages follow the same switch in the extension’s Settings.</span></label></div>
+      <div id="obsidianMsg" class="secondary" style="margin-top:8px" role="status"></div>
+    </section>
     <section class="card" id="healthCard">
       <h2>Check your backup</h2>
       <span class="secondary">Nothing changes unless a result offers a button and you click it.</span>
       <div class="row" style="margin:4px 0 10px"><button id="verifySums" class="tonal small" title="Recomputes each file’s SHA-256 checksum and compares it with SHA256SUMS.txt">Check no files have changed</button><button id="checkPhotos" class="tonal small" title="Opens every saved photo and video and checks it’s there, unchanged, and the size recorded in the chat’s photo list">Check every photo</button><button id="findDupes" class="outlined small" title="Photos saved twice, such as a GIF and its still picture, or a thumbnail beside the full-size photo">Find duplicate photos</button><span class="secondary" id="healthMsg"></span></div>
       <div id="health"></div>
-    </section>
-    <section class="card">
-      <h2>Bring in conversations from other apps</h2>
-      <span class="secondary">One archive for every conversation: bring in chats from WhatsApp, Telegram, Discord, Instagram, Messenger or TikTok, using the export each app makes. They’re kept beside your texts, each marked with its app, and the viewer finds the same person across apps. Bring in a newer export later and only what’s new is added.</span>
-      <div class="row"><button id="importApp" class="tonal small">Bring in an export file…</button><button id="importAppFolder" class="outlined small">Bring in an export folder…</button></div>
-      <details style="margin-top:8px"><summary class="secondary">How to export from each app</summary><ul id="appHow" class="secondary" style="margin:6px 0 0 18px;padding:0"></ul></details>
-      <div id="importAppMsg" class="secondary" style="margin-top:8px"></div>
-    </section>
-    <section class="card">
-      <h2>Bring in other backups</h2>
-      <span class="secondary">Zips or folders made by earlier versions of this extension (pick one export, or a folder that holds several, such as Downloads → Google Messages Exports), or a phone backup made with the Message Archivist app, whose chats are matched to yours by phone number. Only messages and photos that aren’t already here are added; the files you bring in aren’t changed.</span>
-      <div class="row"><button id="importFolder" class="tonal small">Bring in a folder…</button><button id="importZip" class="outlined small">Bring in a zip file…</button><button id="importPhone" class="outlined small" title="A .tar file from the Message Archivist app → Back up this phone">Bring in a phone backup…</button></div>
-      <div id="importMsg" class="secondary" style="margin-top:8px"></div>
     </section>
     <section class="card">
       <h2>Past runs</h2>
@@ -250,39 +331,65 @@
         <div class="setting" id="folderCard"><div class="name"><b>Backup folder</b><span class="secondary">Everything is kept here: every chat, its photos and contact details, and a page to read them.</span></div>
           <div><div class="row"><span id="folderName" class="gray">No folder chosen</span><button id="chooseFolder" class="tonal small">Choose a different folder…</button><button id="allowFolder" class="filled small" hidden>Allow access</button></div>
           <div class="secondary" id="folderAccess" style="margin-top:6px"></div></div></div>
-        <div class="setting"><div class="name"><b>Photos and videos</b><span class="secondary">Needed to put picture messages back on a phone.</span></div>
+        <div class="setting" id="skipCard"><div class="name"><b>Leave out of your archive</b><span class="secondary">Chats of these are skipped <span class="ext-only">by “Back up everything” and </span>when you bring files in. Groups, chats you’ve talked in and chats you’ve labelled are always kept.<span class="app-only"> In the app this is for what you bring in here; the extension’s Settings has the same switches for its backups.</span></span></div>
+          <div><div class="check"><input type="checkbox" id="skipCodes"><label for="skipCodes">Verification codes <span class="secondary">(“123456 is your code”)</span></label></div>
+          <div class="check"><input type="checkbox" id="skipPromos"><label for="skipPromos">Promotions and spam <span class="secondary">(“Reply STOP to opt out”, links from numbers you don’t know, and chats you labelled Spam)</span></label></div>
+          <div class="check"><input type="checkbox" id="skipAutomated"><label for="skipAutomated">Other automated texts <span class="secondary">(alerts, deliveries and reminders from short codes and business names)</span></label></div>
+          <div class="row" style="margin-top:6px"><button id="skipFind" class="outlined small">Find the ones already in my archive…</button></div>
+          <div id="skipMsg" class="secondary" role="status" style="margin-top:6px"></div><div id="skipFound"></div></div></div>
+        <div class="setting ext-only"><div class="name"><b>Photos and videos</b><span class="secondary">Needed to put picture messages back on a phone.</span></div>
           <div class="check"><input type="checkbox" id="includeMedia"><label for="includeMedia">Save photos, GIFs, videos and voice notes</label></div></div>
-        <div class="setting"><div class="name"><b>Photo quality</b><span class="secondary">Full size opens each photo in Google Messages’ viewer; most of that happens while older messages load, so it adds little time.</span></div>
+        <div class="setting ext-only"><div class="name"><b>Photo quality</b><span class="secondary">Full size opens each photo in Google Messages’ viewer; most of that happens while older messages load, so it adds little time.</span></div>
           <select id="photoQuality"><option value="full">Full size (recommended)</option><option value="thumb">As shown in the chat (faster, smaller)</option></select></div>
-        <div class="setting"><div class="name"><b>While a backup runs</b><span class="secondary">Google Messages only loads older messages while its page is showing.</span></div>
+        <div class="setting ext-only"><div class="name"><b>While a backup runs</b><span class="secondary">Google Messages only loads older messages while its page is showing.</span></div>
           <select id="backupWindow"><option value="corner">Small window in a corner of the screen (recommended)</option><option value="window">A window of its own</option><option value="tab">Leave it where it is</option></select></div>
-        <div class="setting"><div class="name"><b>Notifications</b></div>
+        <div class="setting ext-only"><div class="name"><b>Notifications</b></div>
           <div class="check"><input type="checkbox" id="notify"><label for="notify">Tell me when a backup finishes</label></div></div>
+        <div class="setting"><div class="name"><b>Order of chats and people</b><span class="secondary">How lists start out sorted: Chats and People in your archive, and the Backups tab. Each list’s menu still changes it while you look.</span></div>
+          <select id="chatSort"><option value="auto">Each list’s usual order</option><option value="recent">Most recent message first</option><option value="count">Most messages first</option><option value="name">Favorites, then A–Z</option></select></div>
         <div class="setting"><div class="name"><b>Theme</b></div>
           <select id="theme"><option value="system">Same as my computer</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
       </div>
 
       <div class="settings-list" id="advancedList" hidden>
-        <div class="setting"><div class="name"><b>Corner</b><span class="secondary">Where the small backup window goes.</span></div>
+        <div class="setting ext-only"><div class="name"><b>Corner</b><span class="secondary">Where the small backup window goes.</span></div>
           <select id="compactCorner"><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-right">Top right</option><option value="top-left">Top left</option></select></div>
-        <div class="setting"><div class="name"><b>Patience</b><span class="secondary">How long to wait for older messages before deciding a chat is complete. If backups stop before a chat’s first message, choose Thorough.</span></div>
+        <div class="setting ext-only"><div class="name"><b>Patience</b><span class="secondary">How long to wait for older messages before deciding a chat is complete. If backups stop before a chat’s first message, choose Thorough.</span></div>
           <select id="patience"><option value="10">Quick (10 seconds)</option><option value="25">Normal (25 seconds)</option><option value="60">Thorough (60 seconds)</option></select></div>
-        <div class="setting"><div class="name"><b>Full-size photos while loading</b><span class="secondary">Opens new photos in the viewer while Google Messages fetches the next batch, instead of all at the end.</span></div>
+        <div class="setting ext-only"><div class="name"><b>Full-size photos while loading</b><span class="secondary">Opens new photos in the viewer while Google Messages fetches the next batch, instead of all at the end.</span></div>
           <div class="check"><input type="checkbox" id="fullSizeEarly"><label for="fullSizeEarly">On (recommended)</label></div></div>
-        <div class="setting"><div class="name"><b>Double-check</b><span class="secondary">About twice as long; anything missed the first time is added.</span></div>
+        <div class="setting ext-only"><div class="name"><b>Double-check</b><span class="secondary">About twice as long; anything missed the first time is added.</span></div>
           <div class="check"><input type="checkbox" id="verifyRead"><label for="verifyRead">Read each chat twice in “Back up everything”</label></div></div>
-        <div class="setting"><div class="name"><b>Link-preview pictures</b><span class="secondary">Spotify, TikTok, news sites… Chrome asks to let the extension read other websites; it’s only used for those pictures.</span></div>
+        <div class="setting ext-only"><div class="name"><b>Link-preview pictures</b><span class="secondary">Spotify, TikTok, news sites… Chrome asks to let the extension read other websites; it’s only used for those pictures.</span></div>
           <div class="check"><input type="checkbox" id="previewPics"><label for="previewPics">Save them</label></div></div>
-        <div class="setting"><div class="name"><b>Page markup</b><span class="secondary">The exact HTML Google Messages used for each message. Makes messages.json several times bigger.</span></div>
+        <div class="setting ext-only"><div class="name"><b>Page markup</b><span class="secondary">The exact HTML Google Messages used for each message. Makes messages.json several times bigger.</span></div>
           <div class="check"><input type="checkbox" id="rawMarkup"><label for="rawMarkup">Keep it</label></div></div>
-        <div class="setting"><div class="name"><b>Date-range copies</b><span class="secondary">Popup → More options. Downloaded as zip files to Downloads /</span></div>
+        <div class="setting ext-only"><div class="name"><b>Date-range copies</b><span class="secondary">Popup → More options. Downloaded as zip files to Downloads /</span></div>
           <input type="text" id="subfolder" placeholder="(directly in Downloads)"></div>
         <div class="setting"><div class="name"><b>Case reference</b><span class="secondary">For legal or evidence use: recorded in export-info.json, logs and printouts. Every run is logged and every file has a SHA-256 checksum (<code>shasum -a 256 -c SHA256SUMS.txt</code>).</span></div>
           <input type="text" id="caseNote" placeholder="e.g. Case 2026-114, exported by J. Doe"></div>
       </div>
     </section>
   </div>
+
+  <!-- APPS: Google Messages, then a card per app module (options.js renderApps) -->
+  <div class="tab" id="tab-apps" role="tabpanel" hidden>
+    <section class="card">
+      <h2>Your apps</h2>
+      <span class="secondary">Your archive keeps your text messages and your chats from other apps side by side. Each app below says how to get its export; bring it in whenever you like, and only what isn’t here yet is added. Pick several files, or a folder of them, at once.</span>
+      <div class="row"><button id="appsImport" class="filled small">Bring in files…</button><button id="appsImportFolder" class="outlined small">Bring in a folder…</button></div>
+      <div id="appsMsg" class="secondary" style="margin-top:8px" role="status"></div>
+    </section>
+    <div id="appCards"></div>
+  </div>
 </main>
+</div>
+<dialog id="obsidianDlg" class="card">
+  <h2 id="obsDlgTitle">Delete your Obsidian notes?</h2>
+  <p id="obsDlgText" class="gray"></p>
+  <div class="row" style="justify-content:flex-end;margin-top:16px"><button id="obsCancel">Cancel</button><button id="obsNext" class="outlined">Continue…</button><button id="obsGo" class="filled danger" hidden>Delete them for good</button></div>
+  <div id="obsDlgMsg" class="secondary" style="margin-top:8px" role="status"></div>
+</dialog>
 <dialog id="deleteDlg" class="card">
   <h2 id="delTitle"></h2>
   <p id="delText" class="gray"></p>
@@ -291,7 +398,7 @@
   <div id="delMsg" class="secondary" style="margin-top:8px"></div>
 </dialog>
 <dialog id="whoDlg" class="card">
-  <h2>Which one is you?</h2>
+  <h2 id="whoTitle">Which one is you?</h2>
   <p id="whoText" class="gray"></p>
   <div id="whoList" style="display:grid;gap:6px;max-height:50vh;overflow:auto"></div>
   <div class="row" style="justify-content:flex-end;margin-top:16px"><button id="whoSkip">None of these</button></div>
@@ -300,12 +407,16 @@
 <script src="theme.js"></script>
 <script src="zip.js"></script>
 <script src="library.js"></script>
-<script src="importers/importers.js"></script>
-<script src="importers/whatsapp.js"></script>
-<script src="importers/telegram.js"></script>
-<script src="importers/discord.js"></script>
-<script src="importers/meta.js"></script>
-<script src="importers/tiktok.js"></script>
+<script src="obsidian.js"></script>
+<script src="import.js"></script>
+<script src="modules/whatsapp.js"></script>
+<script src="modules/meta.js"></script>
+<script src="modules/snapchat.js"></script>
+<script src="modules/telegram.js"></script>
+<script src="modules/discord.js"></script>
+<script src="modules/tiktok.js"></script>
+<script src="modules/imessage.js"></script>
+<script src="modules/signal.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

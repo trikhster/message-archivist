@@ -1,6 +1,6 @@
 ---
 tags: [reference, format]
-updated: 2026-10-26
+updated: 2026-10-27
 index_version: 5
 ---
 # Library format (index version 5)
@@ -9,7 +9,9 @@ The backup folder the user picks is "the library": every conversation from every
 
 ```
 <backup folder>/
-  index.html, viewer.js, theme.js, theme.css   the offline viewer (rewritten at the end of every run)
+  index.html, viewer.js, library.js,           the offline viewer (rewritten at the end of every run, and by Settings
+  theme.js, theme.css, modules/<app>.js        when a file it loads is missing): every file viewer.html loads (GMLib.pageFiles);
+                                               library.js gives it GMLib's helpers, modules/ how each app shows
   README.txt                                   GMLib.README
   data.js                                      window.GM_EXPORT = { ...summary of every chat }
   messages.csv                                 every chat's messages.csv joined
@@ -17,14 +19,19 @@ The backup folder the user picks is "the library": every conversation from every
   export-info.json                             tool, version, timezone, case note, runs[]
   backup-state.json                            "Back up everything": the conversation list, progress, excluded chats
   labels.json, labels.js                       labels, flags and notes (NOT in the checksums)
+  people.json, people.js                       who's who: the owner's joins, splits and names ([[Sources]] → People; NOT in the checksums)
+  contacts.json, contacts.js                   the phone's address book, from a phone backup with "Save all my contacts" on
+  Obsidian/                                    notes for Obsidian, when turned on ([[Obsidian notes]]; NOT in the checksums)
   SHA256SUMS.txt                               `shasum -a 256 -c` format, sorted, excludes itself
   logs/<YYYY-MM-DD HH.MM.SS> - <kind>.txt      one per run
   removed-chats/<date>/...                     chats deleted from the backup (Settings)
   removed-duplicates/<date>/...                extra photo copies moved aside (Settings)
   restore-to-phone/restore-<date>.tar          restore package for the Android app ([[Restore package]]); not in the checksums
+  accounts.json                                which ID is each source's main account ([[Sources]] → Accounts)
   restore-to-phone/sms-<date>.xml              the same for SMS Backup & Restore (Phone restore → "Using SMS Backup & Restore instead?")
   conversations/<safeName(title)>[ (n)]/       a text-message chat (service "sms")
-  conversations/<App>/<safeName(title)>[ (n)]/ another app's chat (GMLib.chatFolder): WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok…
+  conversations/<App>/<safeName(title)>[ (n)]/ another app's chat (GMLib.chatFolder): WhatsApp, Telegram, Discord, Instagram, Messenger, TikTok, Snapchat…
+  conversations/<App> - <account>/<chat>/      a second account's chat (another number or ID in that app; "Google Messages - (555) 019-9999")
   (each chat folder:)
     messages.json        the chat: convData() with every record(); compact JSON since 0.5.0.0
     progress.json        how far it got, evidence for the first message, checks
@@ -32,7 +39,7 @@ The backup folder the user picks is "the library": every conversation from every
     messages.csv         chatCsv()
     media-index.json     the photo master list (0.4.5.0)
     media-index.csv      the same, for spreadsheets
-    contact.json         contact card; contact/<name>.png photos
+    contact.json         contact card (people: name, number, photo, favorite, card: the phone's contact from a phone backup); contact/<name>.png photos
     media/<YYYY-MM-DD HH.MM> - <sender>[ (n)].<ext>
     journal/000001.json  pieces saved during a run; removed after compaction
 ```
@@ -41,7 +48,7 @@ Folder names come from `safeName()` (forbidden characters → `_`, max 60 chars)
 
 ## messages.json
 `convData(conv, messages, previous, range)`:
-`service?` (absent = `sms`), `conversation`, `conversation_id` (Google's ID; `<service>:<the app's ID or the chat's name>` for another app), `url`, `exported_at`, `updated_at`, `range?`, `participants`, `message_count`, `media_count`, `media_failed`, `media_skipped`, `group?`, `partial?` (what an import's export leaves out), `messages[]`.
+`service?` (absent = `sms`, Google Messages), `account?` and `account_label?` (absent = the source's main account), `conversation`, `conversation_id` (Google's ID; `<service>:<the app's ID or the chat's name>` for another app), `url`, `exported_at`, `updated_at`, `range?`, `participants`, `message_count`, `media_count`, `media_failed`, `media_skipped`, `group?`, `partial?` (what an import's export leaves out), `messages[]`.
 
 Each message is `record(m, index)` in `content.js`:
 
@@ -56,6 +63,7 @@ Each message is `record(m, index)` in `content.js`:
 | `timestamp_raw` | exactly what the page showed |
 | `text_is_fallback` | text taken from the accessibility label |
 | `reply_to` | `{ sender, text }` |
+| `web_window` | for a message read on an app's web page: `[from, to]` ms, when it was sent between (only a group's first message shows its time there); merging matches it to the app's export by side and words within it. The chat has `web_id`, the page's own chat ID |
 | `media[]` | `{ kind, file, width, height, bytes, source, sha256, error?, skipped?, upgraded_from?, want_full? }`; `file` is relative to the chat folder |
 | `media_left_out[]` | `{ kind, reason: 'gif-preview' \| 'duplicate', width, height }` |
 | `gif_previews_skipped` | older form of left-out GIF stills (count) |
@@ -82,7 +90,7 @@ Built by `buildProgress()` in `backupConversation`: `complete` (history complete
 `i` index, `d` 1 = sent, `s` sender, `t` timestamp, `x` text, `p` precision (if not `message`), `tr` raw time, `id`, `r` `{ s, x }` reply, `rc` reactions (the labels Google Messages for Web showed), `m[]` media `{ k kind, f path from library root, w, h, src, sha, err, skip, st status }`, `lo[]` left out `{ k, why, w, h }`.
 
 ## data.js
-`GMLib.indexScript({ exported_at, updated_at, info, conversations: rows, skipped, verification, version })`. Each row is `GMLib.summarize(entry)`: `id`, `title`, `service` (only when not `sms`), `folder`, `file` (the `chat.js` path), `participants`, `updated_at`, `range`, `contact` (summary), `count`, `first`, `last`, `media_saved/failed/pending/skipped`, and from 0.4.5.0 `media: { full, same, thumbnail, original, waiting, skipped, failed, left }`, then `status`, `problems`, `checked_at` from the checks. Read back with `GMLib.parseIndex()`; `GMLib.readLibrary()` migrates older libraries.
+`GMLib.indexScript({ exported_at, updated_at, info, conversations: rows, skipped, verification, version })`. Each row is `GMLib.summarize(entry)`: `id`, `title`, `service` (only when not `sms`), `account` and `account_label` (only for a second account), `folder`, `file` (the `chat.js` path), `participants`, `updated_at`, `range`, `traits` (`{ v, sent, received, codes, promos, links, scams }`, `v` the rules' version, `GMLib.TRAITS_VERSION`: older rows have none, and are counted again where their traits are used; `GMLib.chatTraits`: what tells codes, promotions and automated texts apart, [[Sources]]), `contact` (summary: `people[]` of `{ n, num?, h? (an app handle), photo?, fav? }`), `group` (only `true`, for a group from an import), `count`, `first`, `last`, `media_saved/failed/pending/skipped`, and from 0.4.5.0 `media: { full, same, thumbnail, original, waiting, skipped, failed, left }`, then `status`, `problems`, `checked_at` from the checks, and `imported_at` (`progress.imported.at`: when another app's export last brought it in, for Settings' Apps tab). Read back with `GMLib.parseIndex()`; `GMLib.readLibrary()` migrates older libraries.
 
 ## media-index.json (0.4.5.0)
 `{ conversation, updated_at, statuses: MEDIA_STATUS, counts, items[] }`. Each item: `message_index`, `message_id`, `timestamp`, `sender`, `item` (1-based, `null` for left-out rows), `kind`, `status`, `file` (path from the library root), `width`, `height`, `bytes`, `sha256`, `source`, `note`. Statuses in [[Photo statuses and runs]].
@@ -90,10 +98,21 @@ Built by `buildProgress()` in `backupConversation`: `complete` (history complete
 ## labels.json / labels.js
 Written only by the viewer opened with "Open my backup":
 `{ version: 1, labels: [{ id, name, icon }], chats: { <chatKey>: [labelId] }, messages: { <chatKey>|<msgId or index>: [labelId] }, flags: { <chatId or ci>|<msgId or index>: { note, at } }, updated_at }`.
-`labels.js` is `window.GM_LABELS = …` so `index.html` from disk sees them. Not in `SHA256SUMS.txt`: they're the user's notes, not the record. Note the two key schemes (see [[Known issues]]).
+`keep: { <chatKey>: true }` is a chat the owner said isn't codes, promotions or automated texts ("It's not" in the viewer): it's never kept apart or left out ([[Sources]] → Kept apart). `labels.js` is `window.GM_LABELS = …` so `index.html` from disk sees them. Not in `SHA256SUMS.txt`: they're the user's notes, not the record. Note the two key schemes (see [[Known issues]]).
+
+## contacts.json / contacts.js
+The phone's address book, written by an import of a phone backup whose manifest has `address_book` (the app's *Save all my contacts*), when it's newer than the one here (`newestBook` in `options.js`): `{ format: "gm-address-book", version: 1, captured_at, contacts: [{ key, name?, starred?, numbers?, emails?, nickname?, organization?, job_title?, birthday?, labels?, relations? }] }`, as the phone had it ([[Restore package]]). Replaced whole, never merged; a phone that stopped saving every contact brings an empty `contacts`, which takes them out. `contacts.js` is `window.GM_CONTACTS = …` for `index.html` from disk. `GMLib.people(rows, saved, book)` uses it to tie chats to contacts ([[Sources]] → People). In the checksums: it's what the phone said, not the owner's edits.
+
+## people.json / people.js
+Written only by the viewer opened with "Open my backup" (its People tab): what the owner decided about who's who, by chat key (`GMLib.chatKey`: the conversation ID, else the folder):
+`{ version: 1, joined: [[chatKey, chatKey]], apart: [[chatKey, chatKey]], alone: [chatKey], names: { <chatKey>: name }, updated_at }`.
+People themselves aren't stored: `GMLib.people(rows, saved)` works them out each time from the index and this file ([[Sources]] → People). `people.js` is `window.GM_PEOPLE = …` for `index.html` from disk. Not in `SHA256SUMS.txt`, like the labels.
+
+## Obsidian/
+Notes for Obsidian, written by `obsidian.js` when the owner turns them on ([[Obsidian notes]]): a note per person (with their timeline, photos and links below it) and chat, a calendar (a note a year and a month), events, every photo by day, a note per shared topic (words and phrases), the messages a year (or a month) at a time, and `.message-archivist.json`, the manifest of what was written and what each chat says (`a`: its days, words and phrases, events, photos…). Derived from the archive and open to the owner's own writing, so not in `SHA256SUMS.txt`.
 
 ## SHA256SUMS.txt
 Every file a run writes is hashed as it's written (`sink.hashes`); `writeIndex` merges them into the existing list, drops paths in `sink.removed`, and writes the list sorted. Journal pieces use `writeTemp` and are never listed. Settings' `libraryIO` does the same for its own writes.
 
 ## backup-state.json
-`{ excluded?: [{ id, title, … }], scanned_at, conversations: [{ id, title }], run: { started_at, total, limited, done: [ids], finished_at? } }`. Written by `runTotal()` in `content.js`: a full scan replaces `conversations`, "most recent N" adds to it. A run with no `finished_at` (and not `limited`) is carried on next time, skipping the ids in `done`. `excluded` holds chats deleted with "don't back it up again"; backing one up by hand takes it off. Coverage (`verificationOf`) compares `conversations` with the library.
+`{ excluded?: [{ id, title, … }], scanned_at, conversations: [{ id, title }], run: { started_at, total, limited, done: [ids], finished_at? } }`. Written by `runTotal()` in `content.js`: a full scan replaces `conversations`, "most recent N" adds to it. A run with no `finished_at` (and not `limited`) is carried on next time, skipping the ids in `done`. `excluded` holds chats deleted with "don't back it up again", and chats left out as codes, promotions or automated texts (`reason`: `codes`, `promos` or `automated`; skipped only while Settings still leaves that kind out); backing one up by hand takes it off. Coverage (`verificationOf`) compares `conversations` with the library.

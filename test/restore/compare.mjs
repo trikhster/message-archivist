@@ -4,6 +4,7 @@
 // node test/restore/compare.mjs original.tar backup.tar
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 
 function readTar(path) {
   const buf = readFileSync(path);
@@ -23,7 +24,9 @@ function readTar(path) {
 
 const [a, b] = [readTar(process.argv[2]), readTar(process.argv[3])];
 const key = (t) => [...t.addresses].sort().join(',');
-const lines = (pkg, t) => pkg.entries.get(t.file).toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+// Every piece of a chat (version 2), gzipped or not (version 3).
+const text = (pkg, f) => { const b = pkg.entries.get(f) || Buffer.alloc(0); return (f.endsWith('.gz') ? gunzipSync(b) : b).toString('utf8'); };
+const lines = (pkg, t) => (t.files || [t.file]).flatMap((f) => text(pkg, f).split('\n').filter(Boolean).map((l) => JSON.parse(l)));
 const sha = (pkg, f) => createHash('sha256').update(pkg.entries.get(f) || Buffer.alloc(0)).digest('hex').slice(0, 12);
 const sig = (pkg, m) => [m.date, m.box, m.text || '', m.from || '', (m.parts || []).map((p) => `${p.ct}:${sha(pkg, p.file)}`).join('+')].join('|');
 

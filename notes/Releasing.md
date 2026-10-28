@@ -21,10 +21,19 @@ Chrome allows four-part versions; npm's `npm version` doesn't, so `npm run set-v
 3. `npm run set-version -- P.M.m.p` (package.json, manifest.json, the Android app).
 4. `npm run check`.
 5. Commit on a branch (`release/P.M.m.p`), message `Message Archivist P.M.m.p: <summary>`, with the `Co-Authored-By` line. Push, open a PR into `main` (template: `.github/pull_request_template.md`), merge when approved.
-6. Tag the merge commit `vP.M.m.p` and push the tag. `release.yml` checks the tag matches the manifest, runs `npm run package`, builds the signed APK (below), builds release notes from the changelog section, and publishes the release with `message-archivist-extension-vP.M.m.p.zip`, `message-archivist-android-vP.M.m.p.apk`, their SHA-256 and the APK's signing-key fingerprint. A tag starting `v0.` makes a **pre-release** (production digit 0). Push one tag at a time: GitHub skips tag workflows when more than three tags are pushed at once.
+6. Tag the merge commit `vP.M.m.p` and push the tag. `pages.yml` publishes the app from it (below). `release.yml` checks the tag matches the manifest, runs `npm run package`, builds the app to attach its file hashes, builds the signed APK (below), builds release notes from the changelog section, and publishes the release with `message-archivist-extension-vP.M.m.p.zip`, `message-archivist-android-vP.M.m.p.apk`, their SHA-256 and the APK's signing-key fingerprint. A tag starting `v0.` makes a **pre-release** (production digit 0). Push one tag at a time: GitHub skips tag workflows when more than three tags are pushed at once.
 7. The workflow titles the release just `vP.M.m.p`. Give it a descriptive title: `gh release edit vP.M.m.p --title "vP.M.m.p: <what's new>"`.
 
 PRs are merged with a merge commit (`gh pr merge N --merge`), and tags are annotated: `git tag -a vP.M.m.p -m "Message Archivist P.M.m.p"`.
+
+## The app (GitHub Pages)
+The app ([[App]]) is published by `.github/workflows/pages.yml` on every `v*` tag, so what `https://trikhster.github.io/message-archivist/app/` serves is always exactly a release: it checks the tag matches `package.json`, runs `npm run check` and `npm test`, builds with `npm run app -- _site` and deploys `_site` with `actions/upload-pages-artifact` and `actions/deploy-pages` (pinned; the deploy job alone has `pages: write` and `id-token: write`). Run by hand ("Run workflow"), it must be given a tag; on a branch it does nothing.
+
+**Once, before the first release with the app** (the owner, in the repository's settings):
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
+2. **Settings → Environments → github-pages → Deployment branches and tags**: add a **tag** rule `v*`. Turning Pages on makes this environment allow only the default branch, and a deploy from a tag is refused ("not allowed to deploy to github-pages due to environment protection rules") until the rule is there.
+
+The release notes link the app and attach `message-archivist-app-vP.M.m.p-SHA256SUMS.txt`, the same list as the deployed `app/SHA256SUMS.txt`: anyone can compare it with what Pages serves, or rebuild the tag with `npm run app` and compare. A new version reaches installed apps the next time they're opened after every window was closed (or **Restart now**).
 
 ## The Android app
 `android/app/build.gradle.kts` has its own `versionName`/`versionCode` (set by `set-version`). CI builds a debug APK on every push (artifact `message-archivist-debug-apk`, test builds only). Releases get a **release build signed with the project's key**: no debug-only test hooks (`restore_path`, `backup_path`), not debuggable.

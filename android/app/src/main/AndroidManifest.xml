@@ -8,7 +8,10 @@
   receivers, ComposeActivity and HeadlessSmsSendService below are those minimum
   parts. Texts that arrive while it's the default are saved (SmsReceiver).
   Backing the phone up needs only READ_SMS, not the role; the daily backup is
-  a scheduled job (kept across restarts, hence RECEIVE_BOOT_COMPLETED).
+  a scheduled job (kept across restarts, hence RECEIVE_BOOT_COMPLETED), and
+  waiting for Wi-Fi needs ACCESS_NETWORK_STATE (Android 14 and later refuse to
+  schedule such a job without it). That only says whether there's a network;
+  the app still has no internet access.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -30,6 +33,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- So "Open Google Messages" can find it on Android 11 and later. -->
     <queries>
@@ -57,6 +61,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" />
                 <data android:mimeType="application/x-tar" />
+            </intent-filter>
+            <!-- Another app's export shared to it (WhatsApp's "Export chat": its .txt
+                 or .zip, or the .txt and its photos; a downloaded .zip or .json), for
+                 the phone backup (Exports). Not images: sharing photos doesn't offer it. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
 

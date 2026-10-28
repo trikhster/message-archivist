@@ -12,9 +12,24 @@
   const DAY = 86400000;
   const monthLabel = (k) => !k ? '' : k === 'undated' ? 'Undated' : `${MONTHS[+k.slice(5, 7) - 1]} ${k.slice(0, 4)}`;
   const shortMonth = (k) => `${MONTHS[+k.slice(5, 7) - 1].slice(0, 3)} ${k.slice(0, 4)}`;
+  // A backup folder whose index.html was copied by a backup run from before
+  // library.js went beside it (an extension updated on disk but not reloaded):
+  // say so and how it's fixed, rather than show nothing.
+  if (!globalThis.GMLib) {
+    gate('This copy of the viewer is missing a file', 'library.js isn’t next to it, so it can’t open your backup here. “Open my backup” in the extension still works. Reload the extension in chrome://extensions and run any backup (or bring anything in from Settings), and the file is put back. Your messages are all there.');
+    return;
+  }
   // Opened from the extension ("Open my backup"), files are read straight from
   // the backup folder; their addresses are filled in once read (see below).
-  const LIBRARY = new URLSearchParams(location.search).has('library');
+  // The app (app/app.js) has no data.js of its own: it always reads the folder.
+  const APP = !!window.MA_APP;
+  const LIBRARY = new URLSearchParams(location.search).has('library') || APP;
+  // The Archive tab of Settings (options.html) shows this page in a frame: its
+  // tabs, logo and theme switch are Settings' own, and Settings is the page
+  // around it, asked by message.
+  const EMBEDDED = LIBRARY && new URLSearchParams(location.search).has('embedded') && parent !== window;
+  if (EMBEDDED) document.documentElement.classList.add('embedded');
+  const toSettings = (hash) => (EMBEDDED ? parent.postMessage({ type: 'ma-settings', hash }, location.origin) : chrome.runtime.sendMessage({ type: 'gm-open-settings', hash }));
   const mediaUrl = (f) => LIBRARY ? `gmlib:${encodeURIComponent(f)}` : f.split('/').map(encodeURIComponent).join('/');
   const parseTs = (t) => t ? new Date(+t.slice(0, 4), +t.slice(5, 7) - 1, +t.slice(8, 10), +(t.slice(11, 13) || 0), +(t.slice(14, 16) || 0)).getTime() : null;
   const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -52,7 +67,19 @@
       // Labels and folders, if any were made (labels.js sits next to data.js).
       const l = document.createElement('script');
       l.src = 'labels.js';
-      l.onload = l.onerror = () => loadChats(window.GM_EXPORT).then(boot);
+      l.onload = l.onerror = () => {
+        // Who's who (people.js), the same way.
+        const p = document.createElement('script');
+        p.src = 'people.js';
+        p.onload = p.onerror = () => {
+          // And the phone's address book (contacts.js), which ties chats to contacts.
+          const c = document.createElement('script');
+          c.src = 'contacts.js';
+          c.onload = c.onerror = () => loadChats(window.GM_EXPORT).then(boot);
+          document.head.append(c);
+        };
+        document.head.append(p);
+      };
       document.head.append(l);
     };
     s.onerror = () => boot(null);
@@ -122,7 +149,13 @@
 
   async function openLibrary() {
     const dir = await idbGet('backupDir').catch(() => null);
-    if (!dir) { gate('No backup yet', 'Choose a backup folder in the extension’s Settings first, then back up a chat.'); return; }
+    if (!dir) {
+      // With no folder yet, the setup steps are on Settings' Home.
+      if (EMBEDDED) toSettings('home');
+      else if (APP) location.replace('./#welcome');
+      else gate('No backup yet', 'Choose a backup folder in the extension’s Settings first, then back up a chat.');
+      return;
+    }
     if ((await dir.queryPermission({ mode: 'read' })) !== 'granted') {
       gate('Open your backup', `Chrome needs your OK to open your backup folder, “${dir.name}”. Click below and choose Allow.`, 'Open my backup', async () => {
         if ((await dir.requestPermission({ mode: 'read' })) === 'granted') loadLibrary(dir);
@@ -136,7 +169,7 @@
     LIB_DIR = dir;
     gate('Opening your backup…', `Reading “${dir.name}”.`);
     const text = await libText('data.js');
-    if (!text) { gate('Nothing backed up yet', 'Open a chat in Google Messages, click the 💬 extension icon and choose “Back up this chat”. It will show up here.'); return; }
+    if (!text) { gate('Nothing backed up yet', APP ? 'Bring in a phone backup or another app’s chats (Home → Tools → Bring in files…), or back up from Google Messages with the extension. It will show up here.' : 'Open a chat in Google Messages, click the 💬 extension icon and choose “Back up this chat”. It will show up here.'); return; }
     const D = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
     for (const c of D.conversations || []) {
       if (c.messages || !c.file) continue;
@@ -144,6 +177,8 @@
       try { c.messages = JSON.parse(t.slice(t.indexOf('] = ') + 4, t.lastIndexOf(';'))); } catch { c.messages = []; c.missingFile = true; }
     }
     try { window.GM_LABELS = JSON.parse((await libText('labels.json')) || 'null'); } catch { /* none yet */ }
+    try { window.GM_PEOPLE = JSON.parse((await libText('people.json')) || 'null'); } catch { /* none yet */ }
+    try { window.GM_CONTACTS = JSON.parse((await libText('contacts.json')) || 'null'); } catch { /* none */ }
     document.title = `${dir.name} · Message Archivist`;
     // Photos and videos are read from the folder as they appear on screen.
     const urls = new Map();
@@ -188,6 +223,11 @@
         for (const n of m.addedNodes) if (n.nodeType === 1) { later(n); n.querySelectorAll('[src^="gmlib:"], [href^="gmlib:"]').forEach(later); }
       }
     }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'href'] });
+    // Settings → Order of chats and people: where the Chats and People lists start.
+    try {
+      const sort = GMLib.normalizeSettings((await chrome.storage.local.get('settings')).settings).chatSort;
+      if (sort !== 'auto') { $('#convSort').value = sort; $('#pplSort').value = sort; $('#ctSort').value = sort; }
+    } catch { /* no settings to read */ }
     document.getElementById('gm-gate')?.remove();
     boot(D);
     document.querySelectorAll('[src^="gmlib:"], [href^="gmlib:"]').forEach(later);
@@ -207,40 +247,27 @@
   };
 
   // ---------- phone numbers ----------
-  // As GMLib.formatNumber (library.js isn't loaded here): "(555) 020-0001" in
-  // North America, "+44 770 090 0123" elsewhere; short codes, names and
-  // anything too long to be one number stay as they are.
-  const NUMBER_RE = /^\+?[\d\s().-]{3,}$/;
-  const fmtNumber = (s) => String(s ?? '').split(/,\s*/).map((t) => {
-    const raw = t.trim();
-    if (!NUMBER_RE.test(raw)) return raw;
-    const d = raw.replace(/\D/g, '');
-    if (d.length === 10 || (d.length === 11 && d[0] === '1')) { const x = d.slice(-10); return `(${x.slice(0, 3)}) ${x.slice(3, 6)}-${x.slice(6)}`; }
-    if (raw.startsWith('+') && d.length > 10 && d.length <= 15) { const x = d.slice(-10); return `+${d.slice(0, -10)} ${x.slice(0, 3)} ${x.slice(3, 6)} ${x.slice(6)}`; }
-    return raw;
-  }).join(', ');
-  const isNumberName = (s) => String(s || '').split(/,\s*/).every((t) => NUMBER_RE.test(t.trim()));
+  // GMLib's (library.js): "(555) 020-0001" in North America, "+44 770 090
+  // 0123" elsewhere; short codes, names and anything too long to be one
+  // number stay as they are.
+  const fmtNumber = GMLib.formatNumber;
+  const isNumberName = GMLib.isNumberName;
 
-  // The app each chat came from (as GMLib.SERVICES): text messages unless the
-  // index says otherwise. One archive holds every app's conversations.
-  const APPS = {
-    sms: ['Text messages', '#1a73e8'], whatsapp: ['WhatsApp', '#25d366'], telegram: ['Telegram', '#2aabee'], discord: ['Discord', '#5865f2'],
-    instagram: ['Instagram', '#d62976'], messenger: ['Messenger', '#0084ff'], tiktok: ['TikTok', '#444444'], imessage: ['iMessage', '#34c759'], signal: ['Signal', '#3a76f0'],
-  };
+  // The app each chat came from: text messages unless the index says
+  // otherwise. One archive holds every app's conversations; each app's name
+  // and colour come from its module (modules/, GMLib.SERVICES).
   const appOf = (c) => c?.service || 'sms';
-  const appName = (a) => APPS[a]?.[0] || a;
-  const appBadge = (c) => (appOf(c) === 'sms' ? '' : ` <span class="app-badge" style="--app:${APPS[appOf(c)]?.[1] || '#888'}">${esc(appName(appOf(c)))}</span>`);
-  // Who a one-to-one chat is with, as keys that match across apps: the last
-  // ten digits of each number, and the name.
-  const personKeys = (c) => {
-    if (c.group) return [];
-    const others = (c.contact?.people || []).filter((p) => p.n !== 'Me');
-    const keys = others.map((p) => String(p.num || '').replace(/\D/g, '').slice(-10)).filter((d) => d.length >= 7).map((d) => `#${d}`);
-    const name = (others.length === 1 ? others[0].n : c.title) || '';
-    if (name && !isNumberName(name)) keys.push(`@${name.trim().toLowerCase()}`);
-    else if (isNumberName(c.title)) { const d = c.title.replace(/\D/g, '').slice(-10); if (d.length >= 7) keys.push(`#${d}`); }
-    return keys;
-  };
+  const appName = (a) => GMLib.SERVICES[a]?.label || a;
+  const appColor = (a) => GMLib.SERVICES[a]?.color || '#888';
+  // A source: an app, or a second account in one ("Google Messages · (555) 010-0199").
+  const srcKey = (c) => `${appOf(c)}|${c?.account || ''}`;
+  const srcName = (c) => `${appName(appOf(c))}${c?.account ? ` · ${c.account_label || c.account}` : ''}`;
+  const isMainSms = (c) => appOf(c) === 'sms' && !c?.account;
+  // Main Google Messages chats get a badge only when Google Messages has a second account.
+  let MULTI_SMS = false;
+  const appBadge = (c) => (isMainSms(c) && !MULTI_SMS ? '' : ` <span class="app-badge" style="--app:${appColor(appOf(c))}">${esc(srcName(c))}</span>`);
+  // The colour of an app's badges and dots.
+  const appDots = (services) => `<span class="src-dots" title="${esc(services.map(appName).join(', '))}">${services.map((a) => `<span class="dot" style="--app:${appColor(a)}"></span>`).join('')}</span>`;
 
   // ---------- reactions sent as texts ----------
   // Where a reaction can't travel as one (to a phone without RCS, or as the
@@ -297,6 +324,25 @@
     D = D || { conversations: [], skipped: [] };
     window.GMTheme?.bind($('#themeBtn'));
 
+    // ---------- codes, promotions and automated texts ----------
+    // Chats of one-time codes, promotions and spam, and other automated texts
+    // (GMLib.chatKind) are kept out of All chats, People, Search, Media and
+    // Analysis, in folders of their own, unless "Show them everywhere" is on
+    // (this browser remembers it). A chat the owner kept ("It's not", saved
+    // as `keep` in labels.json) or labelled with anything but Spam is never one.
+    const KINDS = { codes: { icon: '🔑', name: 'Codes', long: 'Verification codes' }, promos: { icon: '📣', name: 'Promotions', long: 'Promotions and spam' }, automated: { icon: '🤖', name: 'Automated', long: 'Other automated texts' } };
+    let SHOW_ALL = false;
+    try { SHOW_ALL = localStorage.getItem('ma-show-filtered') === '1'; } catch { /* storage blocked */ }
+    {
+      const labels = window.GM_LABELS || {};
+      for (const c of D.conversations) {
+        const key = c.id || c.folder || c.title;
+        const ids = labels.chats?.[key] || [];
+        c.kind = labels.keep?.[key] || ids.some((id) => id !== 'spam') ? null : GMLib.chatKind(c, GMLib.chatTraits(c.messages));
+      }
+    }
+    const tucked = (c) => !!c.kind && !SHOW_ALL;
+
     // ---------- prepare data ----------
     const ALL = [];
     D.conversations.forEach((c, ci) => {
@@ -318,10 +364,11 @@
         // Reactions Google Messages for Web showed on the message (labels such as "❤️ from Alex").
         if (m.rc) m.rx = m.rc.flatMap((label) => { const e = label.match(EMOJI_RE); return e ? [{ e: e[0], s: label, label: true }] : []; });
         counts.set(m.s, (counts.get(m.s) || 0) + 1);
-        ALL.push(m);
+        if (!tucked(c)) ALL.push(m);
       }
       c.people = [...counts].map(([name, n]) => ({ name, n })).sort((a, b) => (a.name === 'Me') - (b.name === 'Me') || b.n - a.n);
-      c.group = c.people.filter((p) => p.name !== 'Me').length > 1;
+      // Several people wrote in it: names go on its messages. (c.group is what the index says.)
+      c.multi = c.group === true || c.people.filter((p) => p.name !== 'Me').length > 1;
       // Colour follows the person everywhere: "Me" is slot 1, everyone else gets
       // one of slots 2–8 picked from their name, like Google Messages' avatars.
       c.color = new Map(c.people.map((p) => [p.name, personColor(p.name)]));
@@ -554,30 +601,40 @@
       const sort = $('#convSort').value;
       const app = $('#convApp').value;
       const list = D.conversations.filter((c) => (!q || c.title.toLowerCase().includes(q) || c.people.some((p) => p.name.toLowerCase().includes(q)))
-        && (!app || appOf(c) === app)
-        && (state.folder ? chatLabels(c).includes(state.folder) : !chatLabels(c).includes('spam')));
+        && (!app || srcKey(c) === app)
+        && (state.folder.startsWith('kind:') ? c.kind === state.folder.slice(5)
+          : state.folder ? chatLabels(c).includes(state.folder) : !chatLabels(c).includes('spam') && !tucked(c)));
       renderFolders();
       list.sort(sort === 'count' ? (a, b) => b.messages.length - a.messages.length
         : sort === 'name' ? chatOrder
         : (a, b) => (b.last || 0) - (a.last || 0));
       $('#convList').innerHTML = list.map((c) => {
         const last = c.messages.findLast((m) => !m.rxOf); // a reaction isn't the last message
-        const snip = last ? `${last.s === 'Me' ? 'You: ' : c.group ? last.s + ': ' : ''}${last.x || (last.m.length ? `[${last.m[0].k}]` : '')}` : '';
+        const snip = last ? `${last.s === 'Me' ? 'You: ' : c.multi ? last.s + ': ' : ''}${last.x || (last.m.length ? `[${last.m[0].k}]` : '')}` : '';
         return `<button class="conv${c === state.conv ? ' active' : ''}" data-ci="${c.ci}">${avatar(c.title, convColor(c))}<span class="conv-body">
           <span class="conv-top"><span class="conv-title">${esc(c.title)}${appBadge(c)}${c.pinned ? ' <span class="lab-ico" title="Pinned in Google Messages">📌</span>' : ''}${chatLabels(c).map((id) => ` <span class="lab-ico" title="${esc(labelById(id).name)}">${esc(labelById(id).icon)}</span>`).join('')}</span><span class="conv-date">${fmtDate(c.last)}</span></span>
           <span class="conv-snip" style="display:block">${esc(snip.slice(0, 120))}</span>
-          <span class="conv-count">${plural(c.messages.length, 'message')}${c.group ? ` · ${c.people.length} people` : ''}${c.status === 'incomplete' || c.status === 'problem' || c.missingFile ? ` · ${statusPill(c)}` : ''}</span></span></button>`;
-      }).join('') || `<div class="empty">${!D.conversations.length ? 'No data found. Keep data.js and viewer.js next to this file.' : state.folder ? `No chats labelled ${esc(labelById(state.folder)?.name || '')} yet. Open a chat and use 🏷 Labels.` : D.conversations.some((c) => chatLabels(c).includes('spam')) && !q ? 'Every chat here is labelled Spam: see the 🚫 Spam folder above.' : 'No conversations match.'}</div>`;
+          <span class="conv-count">${plural(c.messages.length, 'message')}${c.multi ? ` · ${c.people.length} people` : ''}${c.status === 'incomplete' || c.status === 'problem' || c.missingFile ? ` · ${statusPill(c)}` : ''}</span></span></button>`;
+      }).join('') || `<div class="empty">${!D.conversations.length ? 'No data found. Keep data.js and viewer.js next to this file.' : state.folder.startsWith('kind:') || (q && state.folder) ? 'No conversations match.' : state.folder ? `No chats labelled ${esc(labelById(state.folder)?.name || '')} yet. Open a chat and use 🏷 Labels.` : D.conversations.some((c) => chatLabels(c).includes('spam')) && !q ? 'Every chat here is labelled Spam: see the 🚫 Spam folder above.' : D.conversations.some(tucked) && !q ? 'Every chat here is codes, promotions or automated texts: see their folders above.' : 'No conversations match.'}</div>`;
     }
-    // The folder bar: All chats, then each label in use.
+    // The folder bar: All chats, each label in use, then codes, promotions and
+    // automated texts, and the switch that shows those everywhere.
     function renderFolders() {
       const count = (id) => D.conversations.filter((c) => chatLabels(c).includes(id)).length;
       const used = LABELS.labels.filter((l) => count(l.id));
-      $('#folders').hidden = !used.length && !state.folder;
+      const kinds = Object.entries(KINDS).map(([k, v]) => [k, v, D.conversations.filter((c) => c.kind === k).length]).filter(([, , n]) => n);
+      $('#folders').hidden = !used.length && !kinds.length && !state.folder;
       $('#folders').innerHTML = `<button class="chip${state.folder ? '' : ' on'}" data-folder="">All chats</button>` +
-        used.map((l) => `<button class="chip${state.folder === l.id ? ' on' : ''}" data-folder="${esc(l.id)}">${esc(l.icon)} ${esc(l.name)} <span class="n">${count(l.id)}</span></button>`).join('');
+        used.map((l) => `<button class="chip${state.folder === l.id ? ' on' : ''}" data-folder="${esc(l.id)}">${esc(l.icon)} ${esc(l.name)} <span class="n">${count(l.id)}</span></button>`).join('') +
+        kinds.map(([k, v, n]) => `<button class="chip${state.folder === `kind:${k}` ? ' on' : ''}" data-folder="kind:${k}" title="${esc(v.long)}${SHOW_ALL ? '' : ': kept out of All chats, People, Search, Media and Analysis'}">${v.icon} ${v.name} <span class="n">${nf(n)}</span></button>`).join('') +
+        (kinds.length ? `<button class="chip" data-showall title="${SHOW_ALL ? 'Keep codes, promotions and automated texts in their folders only' : 'Show codes, promotions and automated texts in All chats, People, Search, Media and Analysis too'}">${SHOW_ALL ? 'Keep them apart' : 'Show them everywhere'}</button>` : '');
     }
     $('#folders').addEventListener('click', (e) => {
+      if (e.target.closest('[data-showall]')) {
+        try { localStorage.setItem('ma-show-filtered', SHOW_ALL ? '0' : '1'); } catch { /* storage blocked */ }
+        location.reload();
+        return;
+      }
       const b = e.target.closest('[data-folder]');
       if (!b) return;
       state.folder = b.dataset.folder;
@@ -585,22 +642,238 @@
     });
     $('#convFilter').addEventListener('input', debounce(renderConvList, 120));
     $('#convSort').addEventListener('change', renderConvList);
-    // The app filter, once the archive holds more than one app's chats.
+    // The source filter (each app, and each second account in one), once there's more than one.
     {
-      const apps = [...new Set(D.conversations.map(appOf))];
-      $('#convApp').hidden = apps.length < 2;
-      $('#convApp').innerHTML = `<option value="">All apps</option>${apps.sort((a, b) => (a === 'sms' ? -1 : b === 'sms' ? 1 : appName(a).localeCompare(appName(b)))).map((a) => `<option value="${esc(a)}">${esc(appName(a))} (${D.conversations.filter((c) => appOf(c) === a).length})</option>`).join('')}`;
+      MULTI_SMS = new Set(D.conversations.filter((c) => appOf(c) === 'sms').map((c) => c.account || '')).size > 1;
+      const sources = new Map();
+      for (const c of D.conversations) sources.set(srcKey(c), { name: srcName(c), n: (sources.get(srcKey(c))?.n || 0) + 1, main: isMainSms(c) });
+      $('#convApp').hidden = sources.size < 2;
+      $('#convApp').innerHTML = `<option value="">All sources</option>${[...sources].sort((a, b) => b[1].main - a[1].main || a[1].name.localeCompare(b[1].name)).map(([k, v]) => `<option value="${esc(k)}">${esc(v.name)} (${v.n})</option>`).join('')}`;
       $('#convApp').addEventListener('change', renderConvList);
     }
-    // The same person's chats in other apps, by number or name.
-    const byPerson = new Map();
-    for (const c of D.conversations) for (const k of personKeys(c)) { if (!byPerson.has(k)) byPerson.set(k, new Set()); byPerson.get(k).add(c); }
-    $('#chatLabelsShown').addEventListener('click', (e) => { const g = e.target.closest('.also [data-goto]'); if (g) openChat(+g.dataset.goto); });
-    const elsewhere = (c) => [...new Set(personKeys(c).flatMap((k) => [...(byPerson.get(k) || [])]))].filter((o) => o !== c && appOf(o) !== appOf(c));
+    $('#chatBack').addEventListener('click', () => { location.hash = '#chat'; });
+    $('#chatLabelsShown').addEventListener('click', (e) => {
+      const g = e.target.closest('.also [data-goto]');
+      if (g) openChat(+g.dataset.goto);
+      // Not codes or spam after all: kept with the other chats from now on (labels.json `keep`).
+      if (e.target.closest('[data-notkind]') && state.conv) {
+        LABELS.keep = { ...(LABELS.keep || {}), [chatKey(state.conv)]: true };
+        saveLabels().then(() => location.reload());
+      }
+    });
+
+    // ---------- people ----------
+    // One person across apps, accounts and numbers (GMLib.people): chats that
+    // share a number, an email address or a handle are one person by
+    // themselves; people with only a name in common are suggestions. What the
+    // owner decides (the same person, not the same, a chat that isn't them, a
+    // name) is people.json, saved in the backup folder like the labels, and
+    // people.js, so the folder's index.html sees it too.
+    let SAVED = GMLib.peopleSaved(window.GM_PEOPLE);
+    const PEOPLE_ROWS = D.conversations.filter((c) => !tucked(c));
+    let PPL = GMLib.people(PEOPLE_ROWS, SAVED, window.GM_CONTACTS || null);
+    const personOf = (c) => PPL.byChat.get(GMLib.chatKey(c)) || null;
+    const personByKey = (k) => PPL.list.find((p) => p.key === k) || PPL.byChat.get(k) || null;
+    const matchesOf = (p) => PPL.suggestions.filter((x) => x.a === p || x.b === p).map((x) => (x.a === p ? x.b : x.a));
+    // The person's other chats (in any app, or from another number), and chats
+    // of people with the same name who aren't joined with them yet.
+    const elsewhere = (c) => personOf(c)?.chats.filter((o) => o !== c) || [];
+    const maybeElsewhere = (c) => { const p = personOf(c); return p ? matchesOf(p).flatMap((q) => q.chats) : []; };
+    const idText = (id) => (id.startsWith('tel:') ? fmtNumber(id.slice(4)) : id.startsWith('email:') ? id.slice(6) : `${appName(id.slice(0, id.indexOf(':')))} ${id.slice(id.indexOf(':') + 1)}`);
+    const pplState = { person: null, matches: false, msgs: [], shown: 0 };
+    async function savePeople(next, keepChat) {
+      SAVED = next;
+      PPL = GMLib.people(PEOPLE_ROWS, SAVED, window.GM_CONTACTS || null);
+      pplState.person = keepChat !== undefined ? (keepChat && PPL.byChat.get(keepChat)) || null : pplState.person && personByKey(pplState.person.key);
+      renderPeopleList();
+      renderPerson();
+      try {
+        await libWrite('people.json', JSON.stringify(SAVED, null, 2));
+        await libWrite('people.js', `window.GM_PEOPLE = ${JSON.stringify(SAVED)};\n`);
+      } catch (e) {
+        alert(`${e.message} The change shows now but wasn’t saved.`);
+      }
+    }
+
+    function renderPeopleList() {
+      const q = $('#pplFilter').value.trim().toLowerCase();
+      const digits = q.replace(/\D/g, '');
+      const sort = $('#pplSort').value;
+      const list = PPL.list.filter((p) => !q || [p.name, ...p.names].some((n) => n.toLowerCase().includes(q))
+        || p.ids.some((id) => idText(id).toLowerCase().includes(q) || (digits.length >= 3 && id.startsWith('tel:') && id.includes(digits))));
+      list.sort(sort === 'name' ? (a, b) => isNumberName(a.name) - isNumberName(b.name) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+        : sort === 'recent' ? (a, b) => (b.last || 0) - (a.last || 0)
+        : sort === 'apps' ? (a, b) => b.services.length - a.services.length || b.count - a.count
+        : (a, b) => b.count - a.count);
+      const n = PPL.suggestions.length;
+      $('#pplSuggest').hidden = !n;
+      $('#pplSuggest').classList.toggle('on', pplState.matches);
+      $('#pplSuggest').textContent = `${n === 1 ? 'Two people have' : `${nf(n)} pairs of people have`} the same name: are they the same person?`;
+      $('#pplList').innerHTML = list.map((p) => `<button class="conv${p === pplState.person ? ' active' : ''}" data-key="${esc(p.key)}">${avatar(p.name, personColor(p.name))}<span class="conv-body">
+        <span class="conv-top"><span class="conv-title">${esc(p.name)}${appDots(p.services)}</span><span class="conv-date">${fmtDate(p.last)}</span></span>
+        <span class="conv-snip" style="display:block">${esc(p.ids.map(idText).filter((x) => x !== p.name).slice(0, 2).join(' · ') || p.names.filter((x) => x !== p.name).join(', '))}</span>
+        <span class="conv-count">${plural(p.count, 'message')}${p.chats.length > 1 ? ` · ${p.chats.length} chats` : ''}</span></span></button>`).join('')
+        || `<div class="empty">${PPL.list.length ? 'No one matches.' : 'No one-to-one chats yet.'}</div>`;
+    }
+
+    const whoHtml = (q) => `<a class="who" href="#people/${encodeURIComponent(q.key)}">${avatar(q.name, personColor(q.name))}<span class="r-body"><span class="r-head"><b>${esc(q.name)}</b>${appDots(q.services)}</span>
+      <span class="r-text" style="display:block">${esc([...new Set(q.chats.map(srcName))].join(', '))} · ${plural(q.count, 'message')}</span></span></a>`;
+    const pairHtml = (a, b) => `<div class="pair" data-a="${esc(a.key)}" data-b="${esc(b.key)}">${whoHtml(a)}<span class="vs">and</span>${whoHtml(b)}${canLabel
+      ? '<span class="p-acts"><button class="small filled" data-same>Same person</button><button class="small outlined" data-apart>Not the same</button></span>' : ''}</div>`;
+    const readOnly = () => (canLabel ? '' : '<p class="readonly-note">To join, split or rename people, open your backup from the extension (its Settings → Open my backup).</p>');
+
+    function renderPerson() {
+      const p = pplState.person;
+      $('#personRename').hidden = $('#personJoin').hidden = !p || pplState.matches || !canLabel;
+      $('#personScroll').scrollTop = 0;
+      if (pplState.matches) {
+        $('#personAvatar').innerHTML = '';
+        $('#personName').textContent = 'The same name, more than once';
+        $('#personMeta').textContent = 'Chats where the name matches but no number or handle does. Say which are the same person; you can split them again later.';
+        $('#personIds').innerHTML = '';
+        $('#personScroll').innerHTML = `<div class="inner">${readOnly()}${PPL.suggestions.length > 1 && canLabel ? `<div class="join-box"><button class="tonal" id="joinAll">They’re all the same people: join all ${nf(PPL.suggestions.length)}</button></div>` : ''}
+          ${PPL.suggestions.map((x) => pairHtml(x.a, x.b)).join('') || '<div class="empty">Nothing left to look at.</div>'}</div>`;
+        return;
+      }
+      if (!p) {
+        $('#personAvatar').innerHTML = '';
+        $('#personName').textContent = PPL.list.length ? 'Pick someone' : 'No one yet';
+        $('#personMeta').textContent = '';
+        $('#personIds').innerHTML = '';
+        $('#personScroll').innerHTML = '';
+        return;
+      }
+      $('#personAvatar').innerHTML = avatar(p.name, personColor(p.name));
+      $('#personName').innerHTML = `${esc(p.name)}${appDots(p.services)}`;
+      $('#personMeta').textContent = `${plural(p.count, 'message')} · ${plural(p.chats.length, 'chat')}${p.first ? ` · ${fmtDate(p.first)} – ${fmtDate(p.last)}` : ''}`;
+      $('#personIds').innerHTML = p.ids.map((id) => `<span class="tag">${esc(idText(id))}</span>`).join(' ');
+      const maybe = matchesOf(p);
+      const groups = PPL.groupsOf(p);
+      const perApp = new Map();
+      for (const c of p.chats) perApp.set(srcName(c), (perApp.get(srcName(c)) || 0) + c.messages.length);
+      const row = (c, acts) => `<div class="p-row">${avatar(c.title, convColor(c))}<span class="r-body"><span class="r-head"><b>${esc(c.title)}</b>${appBadge(c)}</span>
+        <span class="r-text" style="display:block">${plural(c.messages.length, 'message')}${c.first ? ` · ${fmtDate(c.first)} – ${fmtDate(c.last)}` : ''}</span></span><span class="p-acts">${acts}</span></div>`;
+      $('#personScroll').innerHTML = `<div class="inner">${readOnly()}<div id="joinBox"></div>
+        ${maybe.length ? `<div class="p-sec"><h3>The same person? <span class="sub">Same name, no number or handle in common</span></h3>${maybe.map((q) => pairHtml(p, q)).join('')}</div>` : ''}
+        <div class="p-sec"><h3>Chats <span class="sub">${esc([...perApp].map(([a, n]) => `${a} ${nf(n)}`).join(' · '))}</span></h3>
+          ${p.chats.map((c) => row(c, `<button class="small tonal" data-open="${c.ci}">Open</button>${p.chats.length > 1 && canLabel ? `<button class="small" data-split="${esc(GMLib.chatKey(c))}" title="This chat isn’t ${esc(p.name)}: make it someone of its own">Not them</button>` : ''}`)).join('')}</div>
+        ${groups.length ? `<div class="p-sec"><h3>Groups <span class="sub">${plural(groups.length, 'group chat')} they’re in</span></h3>${groups.map((c) => row(c, `<button class="small tonal" data-open="${c.ci}">Open</button>`)).join('')}</div>` : ''}
+        <div class="p-sec"><h3>Messages <span class="sub">Newest first, from every chat with them</span></h3><div id="pMsgs"></div></div></div>`;
+      pplState.msgs = p.chats.flatMap((c) => c.messages.filter((m) => !m.rxOf)).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      pplState.shown = 0;
+      showPersonMessages();
+    }
+    function showPersonMessages() {
+      const box = $('#pMsgs');
+      const p = pplState.person;
+      if (!box || !p) return;
+      box.querySelector('.more')?.remove();
+      const next = pplState.msgs.slice(pplState.shown, pplState.shown + 100);
+      pplState.shown += next.length;
+      // Their messages under the name they have here, whatever each app called them.
+      const who = (m) => (m.s === 'Me' ? 'Me' : p.name);
+      box.insertAdjacentHTML('beforeend', next.map((m) => `<button class="result" data-ci="${m.c.ci}" data-i="${m.i}">${avatar(who(m), personColor(who(m)))}<span class="r-body">
+        <span class="r-head"><b>${esc(who(m))}</b><span>${esc(srcName(m.c))}${p.chats.filter((c) => srcKey(c) === srcKey(m.c)).length > 1 ? ` · ${esc(m.c.title)}` : ''}</span><span>· ${esc(fmtWhen(m))}</span>${m.m.length ? `<span class="tag">${m.m.length} ${m.m.length === 1 ? m.m[0].k : 'media'}</span>` : ''}</span>
+        <span class="r-text" style="display:block">${esc((m.x || '').slice(0, 400))}</span></span></button>`).join('') || '<div class="empty">No messages.</div>');
+      if (pplState.shown < pplState.msgs.length) box.insertAdjacentHTML('beforeend', `<button class="more tonal">Show more (${nf(pplState.msgs.length - pplState.shown)} left)</button>`);
+    }
+
+    // ---------- contacts ----------
+    // Everyone (each person, as on People) as a circle with their photo or
+    // initial, in a grid, with their name or number below; a circle opens the
+    // person on People.
+    function renderContacts() {
+      const q = $('#ctFilter').value.trim().toLowerCase();
+      const digits = q.replace(/\D/g, '');
+      const sort = $('#ctSort').value;
+      const list = PPL.list.filter((p) => !q || [p.name, ...p.names].some((n) => n.toLowerCase().includes(q))
+        || p.ids.some((id) => idText(id).toLowerCase().includes(q) || (digits.length >= 3 && id.startsWith('tel:') && id.includes(digits))));
+      list.sort(sort === 'count' ? (a, b) => b.count - a.count
+        : sort === 'recent' ? (a, b) => (b.last || 0) - (a.last || 0)
+        : sort === 'apps' ? (a, b) => b.services.length - a.services.length || b.count - a.count
+        : (a, b) => isNumberName(a.name) - isNumberName(b.name) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
+      $('#ctCount').textContent = PPL.list.length ? (list.length === PPL.list.length ? plural(list.length, 'contact') : `${nf(list.length)} of ${plural(PPL.list.length, 'contact')}`) : '';
+      $('#ctGrid').innerHTML = list.map((p) => {
+        const sub = p.ids.map(idText).find((x) => x !== p.name) || (p.services.length > 1 ? `${p.services.length} apps` : plural(p.count, 'message'));
+        return `<a class="contact" href="#people/${encodeURIComponent(p.key)}" title="${esc(`${p.name} · ${plural(p.count, 'message')}`)}">${avatar(p.name, personColor(p.name))}<span class="ct-name">${esc(p.name)}</span><span class="ct-sub">${esc(sub)}</span></a>`;
+      }).join('') || `<div class="empty">${PPL.list.length ? 'No one matches.' : 'No one-to-one chats yet.'}</div>`;
+    }
+    $('#ctFilter').addEventListener('input', debounce(renderContacts, 120));
+    $('#ctSort').addEventListener('change', renderContacts);
+
+    $('#pplList').addEventListener('click', (e) => { const b = e.target.closest('.conv'); if (b) location.hash = `#people/${encodeURIComponent(b.dataset.key)}`; });
+    $('#pplFilter').addEventListener('input', debounce(renderPeopleList, 120));
+    $('#pplSort').addEventListener('change', renderPeopleList);
+    $('#pplSuggest').addEventListener('click', () => { location.hash = '#people/~matches'; });
+    $('#personBack').addEventListener('click', () => { location.hash = '#people'; });
+    $('#personRename').addEventListener('click', () => {
+      const p = pplState.person;
+      const name = p && prompt(`A name for ${p.name} (leave it empty to go back to the name their chats give):`, p.named ? p.name : '');
+      if (name != null && p) savePeople(GMLib.renamePerson(SAVED, p, name), p.key);
+    });
+    $('#personJoin').addEventListener('click', () => {
+      const p = pplState.person;
+      if (!p) return;
+      const others = PPL.list.filter((q) => q !== p).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
+      const label = (q) => `${q.name} · ${[...new Set(q.chats.map(srcName))].join(', ')} · ${plural(q.count, 'message')}`;
+      const byLabel = new Map(others.map((q) => [label(q), q]));
+      $('#joinBox').innerHTML = `<div class="join-box"><input id="joinWho" class="pill" list="joinList" placeholder="Who else is ${esc(p.name)}? A name, number or handle"><datalist id="joinList">${[...byLabel.keys()].map((l) => `<option value="${esc(l)}">`).join('')}</datalist>
+        <button class="small filled" id="joinGo">Join</button><button class="small" id="joinCancel">Cancel</button></div>`;
+      $('#joinWho').focus();
+      const go = () => {
+        const v = $('#joinWho').value.trim();
+        const named = others.filter((q) => q.name.toLowerCase() === v.toLowerCase() || q.ids.some((id) => idText(id).toLowerCase() === v.toLowerCase()));
+        const q = byLabel.get(v) || (named.length === 1 ? named[0] : null);
+        if (!q) { alert(named.length ? 'More than one person has that name: pick one from the list.' : 'Pick someone from the list.'); return; }
+        savePeople(GMLib.joinPeople(SAVED, p, q), p.key);
+      };
+      $('#joinGo').onclick = go;
+      $('#joinWho').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+      $('#joinCancel').onclick = () => { $('#joinBox').innerHTML = ''; };
+    });
+    $('#personScroll').addEventListener('click', (e) => {
+      const pair = e.target.closest('.pair');
+      if (pair && e.target.closest('[data-same], [data-apart]')) {
+        const a = personByKey(pair.dataset.a);
+        const b = personByKey(pair.dataset.b);
+        if (!a || !b) return;
+        const stay = pplState.matches ? undefined : pplState.person?.key;
+        savePeople(e.target.closest('[data-same]') ? GMLib.joinPeople(SAVED, a, b) : GMLib.keepApart(SAVED, a, b), stay);
+        return;
+      }
+      if (e.target.closest('#joinAll')) {
+        if (!confirm(`Join all ${nf(PPL.suggestions.length)} pairs of people who share a name? Each can be split again from their page.`)) return;
+        savePeople(PPL.suggestions.reduce((s2, x) => GMLib.joinPeople(s2, x.a, x.b), SAVED));
+        return;
+      }
+      const split = e.target.closest('[data-split]');
+      if (split) {
+        const p = pplState.person;
+        const c = p?.chats.find((x) => GMLib.chatKey(x) === split.dataset.split);
+        if (c) savePeople(GMLib.splitChat(SAVED, p, c), GMLib.chatKey(p.chats.find((x) => x !== c)));
+        return;
+      }
+      const open = e.target.closest('[data-open]');
+      if (open) { location.hash = `#chat/${open.dataset.open}`; return; }
+      if (e.target.closest('.more')) { showPersonMessages(); return; }
+      const r = e.target.closest('.result');
+      if (r) location.hash = `#chat/${r.dataset.ci}/${r.dataset.i}`;
+    });
     $('#convList').addEventListener('click', (e) => {
       const b = e.target.closest('.conv');
       if (b) location.hash = `#chat/${b.dataset.ci}`;
     });
+
+    // Under a chat's name: its labels, what kind of texts it is (with "It's
+    // not"), and who it's with (their page) and where else they are.
+    function headerExtras(c) {
+      const who = personOf(c);
+      const also = elsewhere(c);
+      const maybe = maybeElsewhere(c);
+      const chip = (o, list, maybeOne) => `<button class="chip${maybeOne ? ' maybe' : ''}" data-goto="${o.ci}" title="${esc(o.title)}${maybeOne ? ': the same name, not joined yet' : ''}">${esc(srcName(o))}${list.filter((x) => srcKey(x) === srcKey(o)).length > 1 || srcKey(o) === srcKey(c) ? `: ${esc(o.title)}` : ''}${maybeOne ? '?' : ''}</button>`;
+      const kind = c.kind ? `<div class="also">${KINDS[c.kind].icon} ${esc(KINDS[c.kind].long)}${SHOW_ALL ? '' : ': kept out of All chats, People, Search, Media and Analysis'}${canLabel ? ' <button class="chip" data-notkind title="Keep it with your other chats from now on">It’s not</button>' : ''}</div>` : '';
+      return chatLabels(c).map(labelChip).join('') + kind + (who ? `<div class="also"><a class="person-link" href="#people/${encodeURIComponent(who.key)}" title="Every chat with ${esc(who.name)}, in every app">👤 ${esc(who.name)}</a>${also.length ? ` · also in ${also.map((o) => chip(o, also)).join(' ')}` : ''}${maybe.length ? ` · maybe ${maybe.map((o) => chip(o, maybe, true)).join(' ')}` : ''}</div>` : '');
+    }
 
     // ---------- chat view ----------
     const chatScroll = $('#chatScroll');
@@ -736,15 +1009,15 @@
       }
       $('#chatTitle').innerHTML = `${esc(c.title)}${appBadge(c)}`;
       $('#chatAvatar').innerHTML = avatar(c.title, convColor(c));
-      const numbers = (c.contact?.people || []).map((p) => p.num).filter((n) => n && n !== c.title);
-      const also = elsewhere(c);
-      $('#chatLabelsShown').innerHTML = chatLabels(c).map(labelChip).join('') + (also.length ? `<div class="also">Also in ${also.map((o) => `<button class="chip" data-goto="${o.ci}" title="${esc(o.title)}">${esc(appName(appOf(o)))}${also.filter((x) => appOf(x) === appOf(o)).length > 1 ? `: ${esc(o.title)}` : ''}</button>`).join(' ')}</div>` : '');
+      // Numbers as the title shows them, and not again when the title is the number.
+      const numbers = (c.contact?.people || []).map((p) => p.num && fmtNumber(p.num)).filter((n) => n && n !== fmtNumber(c.title) && !fmtNumber(c.title).split(', ').includes(n));
+      $('#chatLabelsShown').innerHTML = headerExtras(c);
       $('#chatMeta').textContent = `${numbers.length ? `${numbers.slice(0, 3).join(', ')}${numbers.length > 3 ? '…' : ''} · ` : ''}${plural(c.messages.length, 'message')} · ${plural(c.people.length, 'participant')}${c.first ? ` · ${fmtDate(c.first)} – ${fmtDate(c.last)}` : ''}${c.contact?.e2ee ? ' · end-to-end encrypted' : ''}`;
       renderPeople();
 
       const terms = state.terms;
       const msgs = c.messages.filter((m) => !m.rxOf && (!state.people.size || state.people.has(m.s)) && (!state.mediaOnly || m.m.length));
-      chatShowNames = c.group || state.people.size > 0;
+      chatShowNames = c.multi || state.people.size > 0;
       const months = [];
       let cur = null;
       for (const m of msgs) {
@@ -830,7 +1103,7 @@
       menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
       const refresh = () => {
         renderConvList();
-        if (state.conv) $('#chatLabelsShown').innerHTML = chatLabels(state.conv).map(labelChip).join('');
+        if (state.conv) $('#chatLabelsShown').innerHTML = headerExtras(state.conv);
         if (target.msg) { const el = document.getElementById(`m${target.msg.c.ci}-${target.msg.i}`); if (el) el.outerHTML = msgHtml(target.msg, state.terms, !!el.querySelector('.who'), !el.querySelector('.time.more')); }
         fillLabelSelect();
         if (location.hash.startsWith('#review')) renderReview();
@@ -881,7 +1154,7 @@
     // Settings does it (it keeps the index, checksums and log right), after asking.
     $('#chatDelete').hidden = !LIBRARY || !window.chrome?.runtime?.id;
     $('#chatDelete').onclick = () => {
-      if (state.conv) chrome.runtime.sendMessage({ type: 'gm-open-settings', hash: `delete:${encodeURIComponent(state.conv.folder)}` });
+      if (state.conv) toSettings(`delete:${encodeURIComponent(state.conv.folder)}`);
     };
     document.addEventListener('click', (e) => {
       const b = e.target.closest('[data-msglabels]');
@@ -951,7 +1224,8 @@
     }
 
     // ---------- global search ----------
-    const fillConvSelect = (sel) => { sel.innerHTML += [...D.conversations].sort(chatOrder).map((c) => `<option value="${c.ci}">${favourite(c) ? '⭐ ' : ''}${esc(c.title)}</option>`).join(''); };
+    // Each chat by name, with its app when it isn't a text chat (two chats with Alex can be texts and WhatsApp).
+    const fillConvSelect = (sel) => { sel.innerHTML += D.conversations.filter((c) => !tucked(c)).sort(chatOrder).map((c) => `<option value="${c.ci}">${favourite(c) ? '⭐ ' : ''}${esc(c.title)}${isMainSms(c) && !MULTI_SMS ? '' : ` (${esc(srcName(c))})`}</option>`).join(''); };
     const fillPeople = (sel, convIdx, anyLabel = 'Anyone') => {
       const keep = sel.value;
       const list = convIdx === '' || convIdx === 'all' ? PEOPLE : D.conversations[convIdx].people.map((p) => p.name).sort(personOrder);
@@ -1016,7 +1290,7 @@
         .map((x) => `<span class="ctx-line"><b>${esc(x.s === 'Me' ? 'You' : x.s)}</b> ${esc((x.x || (x.m.length ? `[${x.m[0].k}]` : '')).slice(0, 160))}</span>`).join('');
       const ctx = $('#sCtx').checked;
       list.insertAdjacentHTML('beforeend', next.map((m) => `<button class="result" data-ci="${m.c.ci}" data-i="${m.i}" data-key="${esc(flagKey(m))}">${avatar(m.s, m.c.color.get(m.s))}<span class="r-body">
-        <span class="r-head"><b>${esc(m.s)}</b><span>in ${esc(m.c.title)}</span><span>· ${esc(fmtWhen(m))}</span>${m.m.length ? `<span class="tag">${m.m.length} ${m.m.length === 1 ? m.m[0].k : 'media'}</span>` : ''}${m.r ? '<span class="tag">reply</span>' : ''}<span class="r-flag">${flagOf(m) ? `★ ${esc(flagOf(m).note || 'flagged')}` : ''}</span></span>
+        <span class="r-head"><b>${esc(m.s)}</b><span>in ${esc(m.c.title)}${isMainSms(m.c) && !MULTI_SMS ? '' : ` · ${esc(srcName(m.c))}`}</span><span>· ${esc(fmtWhen(m))}</span>${m.m.length ? `<span class="tag">${m.m.length} ${m.m.length === 1 ? m.m[0].k : 'media'}</span>` : ''}${m.r ? '<span class="tag">reply</span>' : ''}<span class="r-flag">${flagOf(m) ? `★ ${esc(flagOf(m).note || 'flagged')}` : ''}</span></span>
         ${ctx ? `<span class="ctx">${around(m, -2, 0)}</span>` : ''}<span class="r-text" style="display:block">${snippet(m, terms)}</span>${ctx ? `<span class="ctx">${around(m, 1, 3)}</span>` : ''}</span>
         <span class="flag${flagOf(m) ? ' on' : ''}" data-flag="${esc(flagKey(m))}" title="Flag this message" role="button">${flagOf(m) ? '★' : '☆'}</span></button>`).join(''));
       if (shown < searchResults.length) list.insertAdjacentHTML('beforeend', `<button class="more tonal">Show more (${nf(searchResults.length - shown)} left)</button>`);
@@ -1091,7 +1365,7 @@
       const key = esc(flagKey(m));
       const chatLabs = chatLabels(m.c);
       return `<div class="result rv-item" data-ci="${m.c.ci}" data-i="${m.i}" data-key="${key}">${avatar(m.s, m.c.color.get(m.s))}<span class="r-body">
-        <span class="r-head"><b>${esc(m.s)}</b><span>in ${esc(m.c.title)}</span><span>· ${esc(fmtWhen(m))}</span>${m.m.length ? `<span class="tag">${m.m.length} ${m.m.length === 1 ? m.m[0].k : 'media'}</span>` : ''}${m.r ? '<span class="tag">reply</span>' : ''}</span>
+        <span class="r-head"><b>${esc(m.s)}</b><span>in ${esc(m.c.title)}${isMainSms(m.c) && !MULTI_SMS ? '' : ` · ${esc(srcName(m.c))}`}</span><span>· ${esc(fmtWhen(m))}</span>${m.m.length ? `<span class="tag">${m.m.length} ${m.m.length === 1 ? m.m[0].k : 'media'}</span>` : ''}${m.r ? '<span class="tag">reply</span>' : ''}</span>
         <span class="r-text" style="display:block">${snippet(m, parseTerms($('#rFind').value))}</span>
         ${f ? `<span class="rv-note">★ ${esc(f.note || 'Flagged, no note')}</span>` : ''}
         <span class="rv-labels">${msgLabels(m).map(labelChip).join('')}${chatLabs.length ? `<span class="rv-chatlabs" title="Labels on the whole chat">chat: ${chatLabs.map((id) => esc(labelById(id).icon)).join(' ')}</span>` : ''}</span></span>
@@ -1671,7 +1945,9 @@
           ['Last updated', D.updated_at ? esc(new Date(D.updated_at).toLocaleString()) : null],
           ['Timezone of times shown', esc(info.timezone || '')],
           ['Browser', esc(info.user_agent || '')],
-          ['Source', esc(info.source || '')],
+          ['Sources', esc([...new Set(D.conversations.map(srcName))].map((a) => `${a} (${D.conversations.filter((c) => srcName(c) === a).length})`).join(', '))],
+          ['Kept apart', Object.keys(KINDS).some((k) => D.conversations.some((c) => c.kind === k)) ? `${Object.entries(KINDS).map(([k, v]) => [v, D.conversations.filter((c) => c.kind === k).length]).filter(([, n]) => n).map(([v, n]) => `${v.icon} ${esc(v.long)} ${nf(n)}`).join(' · ')}${SHOW_ALL ? ' (shown everywhere)' : ' (in their own folders in Chats; Settings can leave them out of the backup)'}` : 'None'],
+          ['People', `${nf(PPL.list.length)} in one-to-one chats${PPL.list.some((p) => p.services.length > 1) ? `, ${nf(PPL.list.filter((p) => p.services.length > 1).length)} of them in more than one app` : ''}${PPL.suggestions.length ? ` · <a href="#people/~matches">${nf(PPL.suggestions.length)} possible matches</a>` : ''}`],
           ['Case reference', esc(info.case_note || '')],
           ['Contents', `${plural(D.conversations.length, 'conversation')}, ${plural(ALL.length, 'message')}, ${plural(MEDIA.length, 'media file')}`],
         ]) + '</div>';
@@ -1763,7 +2039,7 @@
     }
 
     // ---------- routing ----------
-    // #chat/<conversation>/<message>, #search, #media, #review, #stats/<conversation|all>, #about,
+    // #chat/<conversation>/<message>, #people/<a chat of theirs>, #search, #media, #review, #stats/<conversation|all>, #about,
     // #labels/<Google conversation ID or folder>, which opens that chat's labels,
     // and #chat-id/<Google conversation ID>.
     let mediaRendered = false;
@@ -1785,15 +2061,30 @@
         if (c) setTimeout(() => labelMenu($('#chatLabels'), { chat: c }), 50);
         return;
       }
-      const name = { chat: 'chats', search: 'search', media: 'media', review: 'review', stats: 'stats', about: 'about' }[view] || 'chats';
+      const name = { chat: 'chats', people: 'people', contacts: 'contacts', search: 'search', media: 'media', review: 'review', stats: 'stats', about: 'about' }[view] || 'chats';
       document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
       document.querySelectorAll('nav a').forEach((n) => n.classList.toggle('active', n.dataset.view === name));
+      // In Settings, its menu has the views: tell it which one this is.
+      if (EMBEDDED) parent.postMessage({ type: 'ma-view', view: name }, location.origin);
       closeLightbox();
       tip.style.display = 'none';
       if (name === 'chats') {
+        // On a narrow screen the list and a chat take turns: a chat picked by name shows on its own.
+        $('#view-chats').classList.toggle('picked', a != null && a !== '');
         const ci = a != null && a !== '' ? +a : state.conv ? state.conv.ci : [...D.conversations].sort((x, y) => (y.last || 0) - (x.last || 0))[0]?.ci;
         if (ci != null) openChat(ci, b != null ? +b : undefined);
         else renderChat();
+      } else if (name === 'people') {
+        // #people/<a chat of theirs>, or #people/~matches for the same-name suggestions.
+        const key = a ? decodeURIComponent(a) : '';
+        pplState.matches = key === '~matches';
+        $('#view-people').classList.toggle('picked', !!key);
+        pplState.person = pplState.matches ? null : (key && personByKey(key)) || (pplState.person && personByKey(pplState.person.key)) || [...PPL.list].sort((x, y) => y.count - x.count)[0] || null;
+        renderPeopleList();
+        renderPerson();
+        $('#pplList .conv.active')?.scrollIntoView({ block: 'nearest' });
+      } else if (name === 'contacts') {
+        renderContacts();
       } else if (name === 'search') {
         runSearch();
         $('#q').focus();
@@ -1824,11 +2115,11 @@
       // Typing in a text field or menu isn't a shortcut; a focused checkbox or button is fine.
       if (document.activeElement.matches('input:not([type="checkbox"]):not([type="radio"]), select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
       const v = document.querySelector('.view.active').id;
-      const tabs = { 1: '#chat', 2: '#search', 3: '#media', 4: '#review', 5: '#stats', 6: '#about' };
+      const tabs = { 1: '#chat', 2: '#people', 3: '#contacts', 4: '#search', 5: '#media', 6: '#review', 7: '#stats', 8: '#about' };
       if (e.key === '/') {
         e.preventDefault();
-        (v === 'view-chats' ? $('#chatSearch') : v === 'view-review' ? $('#rFind') : $('#q')).focus();
-        if (v !== 'view-chats' && v !== 'view-search' && v !== 'view-review') location.hash = '#search';
+        (v === 'view-chats' ? $('#chatSearch') : v === 'view-people' ? $('#pplFilter') : v === 'view-contacts' ? $('#ctFilter') : v === 'view-review' ? $('#rFind') : $('#q')).focus();
+        if (v !== 'view-chats' && v !== 'view-people' && v !== 'view-contacts' && v !== 'view-search' && v !== 'view-review') location.hash = '#search';
       } else if (tabs[e.key]) {
         location.hash = tabs[e.key];
       } else if (e.key === '?') {
@@ -1839,13 +2130,18 @@
         if (v === 'view-chats') $('#chatPrint').click(); else if (v === 'view-search') $('#sPrint').click(); else if (v === 'view-review') $('#rPrint').click();
       } else if (v === 'view-chats' && (e.key === 'n' || e.key === 'N')) {
         goHit(state.hit + (e.key === 'N' ? -1 : 1));
-      } else if (v === 'view-chats' && (e.key === 'j' || e.key === 'k')) {
-        // Next / previous conversation in the list.
-        const items = [...document.querySelectorAll('.conv')];
+      } else if ((v === 'view-chats' || v === 'view-people') && (e.key === 'j' || e.key === 'k')) {
+        // Next / previous conversation (or person) in the list.
+        const items = [...document.querySelectorAll(`#${v} .conv`)];
         const i = items.findIndex((b) => b.classList.contains('active'));
         items[Math.max(0, Math.min(items.length - 1, i + (e.key === 'j' ? 1 : -1)))]?.click();
       }
     });
+    // Opened from Settings (or the app's home): the way back. Not in the copy kept in the backup folder.
+    if (LIBRARY && !EMBEDDED && globalThis.chrome?.runtime?.sendMessage) {
+      $('#settingsBtn').hidden = false;
+      $('#settingsBtn').onclick = () => toSettings('home');
+    }
     $('#helpBtn').onclick = () => { $('#help').hidden = false; };
     $('#help').addEventListener('click', (e) => { if (e.target.id === 'help' || e.target.closest('.close')) $('#help').hidden = true; });
     updateFlagCount();

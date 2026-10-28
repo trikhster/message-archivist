@@ -11,6 +11,8 @@ updated: 2026-10-26
 | `runs` | content `recordRun()`, options (imports, clean-ups) | last 30 runs: `{ at, kind, target, ok, summary, added, log[] }` |
 | `chatStatus` | background on `gm-backup-status` | per chat ID: `{ title, complete, count, oldest, status, media, at }`, read by the popup |
 | `restore` (`chrome.storage.session`) | background `compactWindow()` | per tab ID: the bounds and state of a window shrunk for a backup, given back by `gm-restore-window`. Session storage survives the worker being stopped, not a browser restart |
+| `webcap:<app>:<chat id>` | background on `gm-web-capture` | what an app's web page reader kept of one chat ([[Importers]] → Web page readers): `{ chat: { id, title, people, group }, items: { <key>: { key, at, from, to, me, sender, text, media[], reply? } }, updated_at }`, until Settings → Apps → **Put them in my archive** |
+| `webdone:<app>:<chat id>` | options `bringInWeb()` | the keys already put in the archive, so reading the chat again doesn't queue them again |
 | `myNames` | options `whoAmI()` | per service: the names that are you in that app's exports ("Which one is you?"), e.g. `{ whatsapp: ['Alex Doe'] }` ([[Sources]]) |
 | `theme` | `theme.js` (`GMTheme.set`) | `light`, `dark` or `system`; mirrors the extension pages' choice so the progress panel on the Messages tab matches |
 
@@ -33,9 +35,14 @@ Every part reads settings through `GMLib.normalizeSettings()` (`library.js`, loa
 | `downloadsSubfolder` | `Google Messages Exports` | date-range zips go to Downloads/this |
 | `caseNote` | `''` | case reference written into export-info.json, logs and printouts |
 | `schedules` | `[]` | the automatic backup list (below) |
+| `obsidian` | `false` | keep the Obsidian notes up to date after every backup and import (Tools → Obsidian; [[Obsidian notes]]) |
+| `chatSort` | `'auto'` | how lists of chats and people start out sorted (Settings → Order of chats and people): `auto` (each list's own: the viewer's Chats by Recent, People by Most messages, Backups by Favorites then A–Z), `recent`, `count` or `name`; each list's menu still changes it while you look |
+| `skipCodes`, `skipPromos`, `skipAutomated` | `false` | leave verification codes, promotions and spam, or other automated texts out of the archive: "Back up everything" and imports skip them (Settings → Leave out of your archive; [[Sources]] → Kept apart) |
 | `settingsVersion` | `5` | set by the migration |
 
 Migration from 0.4.x (`normalizeSettings`): popup `fullSize: false` → `fullSize: false`; popup `includeMedia: false` → `includeMedia: false`; `ownWindow: false` → `backupWindow: 'tab'`; everything else takes the new defaults; old keys (`popup`, `ownWindow`, `compactWindow`, `totalFullSize`, `scheduleFullSize`, `saveMode`, schedule `action`) are removed. The background worker saves the migrated form on install and startup.
+
+**In the app** ([[App]]) the same keys (`settings`, `runs`, `myNames`, `theme`…) are kept by `app/app.js` in the app's own IndexedDB (`ma-app` / `storage`), separate from the extension's, and its folder handle is in its own `gm-exporter` / `kv`. Only the backup folder is shared.
 
 Link-preview pictures ("previewPics") aren't a stored setting: the checkbox reflects whether the optional `https://*/*` host permission is granted.
 
@@ -51,5 +58,6 @@ Permission: `queryPermission({ mode: 'readwrite' })`; Chrome may drop it after a
 - `gm-settings-mode` (Settings page): `basic` or `advanced`, the list last shown.
 
 ## localStorage (viewer)
+- `ma-show-filtered`: `1` when **Show them everywhere** is on (codes, promotions and automated texts in All chats, People, Search, Media and Analysis too).
 - `gm-flags:<exported_at>:<chat ids…>`: flags for a viewer **not** opened from the extension (`index.html` from disk). With "Open my backup" flags live in `labels.json` and any here are moved over once.
 - `gm-theme`: the theme choice for each extension page and the viewer (`theme.js`). The source of truth for those pages; `chrome.storage.local.theme` is a copy for the content script.

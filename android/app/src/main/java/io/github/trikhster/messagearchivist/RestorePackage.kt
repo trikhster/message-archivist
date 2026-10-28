@@ -7,12 +7,13 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
+import java.util.zip.GZIPInputStream
 
 /**
  * A restore package: made by the Message Archivist extension (Settings → Phone
  * restore), or by this app backing a phone up. A tar file of
- * `media/<n>.<ext>`, `threads/<nnnn>.ndjson` (one message per line) and
- * `manifest.json`. See notes/Restore package.md in the project.
+ * `media/<n>.<ext>`, `threads/<nnnn>.ndjson` (one message per line; since
+ * version 3 gzipped, `.ndjson.gz`) and `manifest.json`. See notes/Restore package.md in the project.
  *
  * Opening it reads only the 512-byte headers (seeking past each file), so a
  * package of many gigabytes is indexed in a moment; messages and photos are
@@ -26,6 +27,11 @@ class RestorePackage(private val channel: FileChannel, private val closer: AutoC
     val manifest: JSONObject
     /** Where the entries end (the end-of-archive blocks start): an update adds from here. */
     val end: Long
+    /** Bytes taken by entries a later one of the same name replaced (old manifests, chats written again): what compacting would save. */
+    var deadBytes = 0L
+        private set
+    /** The entries in use, in file order: (name, header offset, size). */
+    val live: List<Triple<String, Long, Long>> get() = entries.entries.map { (n, e) -> Triple(n, e.first - 512, e.second) }.sortedBy { it.second }
 
     init {
         val header = ByteBuffer.allocate(512)
@@ -39,7 +45,7 @@ class RestorePackage(private val channel: FileChannel, private val closer: AutoC
             val name = text(h, 0, 100).let { n -> text(h, 345, 155).let { p -> if (p.isNotEmpty()) "$p/$n" else n } }
             val size = text(h, 124, 12).trim().ifEmpty { "0" }.toLong(8)
             if (pos + 512 + size > total) break // cut short (an update that stopped): ignore the rest
-            entries[name] = (pos + 512) to size
+            entries.put(name, (pos + 512) to size)?.let { old -> deadBytes += 512 + (old.second + 511) / 512 * 512 }
             pos += 512 + (size + 511) / 512 * 512
         }
         end = pos
@@ -68,8 +74,11 @@ class RestorePackage(private val channel: FileChannel, private val closer: AutoC
     /** The names of every file in the package. */
     val names: Set<String> get() = entries.keys
 
-    /** A file's bytes (a chat's messages; not for photos, which can be large). */
-    fun bytes(name: String): ByteArray? = entries[name]?.let { e -> open(e).use { it.readBytes() } }
+    /** A file's bytes (a chat's messages, unzipped; not for photos, which can be large). */
+    fun bytes(name: String): ByteArray? = entries[name]?.let { e -> text(name, open(e)).use { it.readBytes() } }
+
+    // A chat's messages: gzipped since version 3 (`.ndjson.gz`), plain before.
+    private fun text(name: String, raw: InputStream): InputStream = if (name.endsWith(".gz")) GZIPInputStream(raw, 1 shl 16) else raw
 
     /**
      * Every message of one thread, oldest first, one JSON object at a time. A
@@ -79,7 +88,7 @@ class RestorePackage(private val channel: FileChannel, private val closer: AutoC
     fun messages(thread: JSONObject, each: (JSONObject) -> Unit) {
         for (file in threadFiles(thread)) {
             val e = entries[file] ?: continue
-            BufferedReader(InputStreamReader(open(e), Charsets.UTF_8), 1 shl 16).useLines { lines ->
+            BufferedReader(InputStreamReader(text(file, open(e)), Charsets.UTF_8), 1 shl 16).useLines { lines ->
                 for (line in lines) if (line.isNotBlank()) each(JSONObject(line))
             }
         }
@@ -106,7 +115,8 @@ class RestorePackage(private val channel: FileChannel, private val closer: AutoC
     companion object {
         const val FORMAT = "gm-restore"
         // 1: one file per thread. 2: a thread can be in several (`files`).
-        const val VERSION = 2
+        // 3: a thread's files can be gzipped (`.ndjson.gz`).
+        const val VERSION = 3
 
         fun threadFiles(thread: JSONObject): List<String> =
             thread.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: listOf(thread.getString("file"))
