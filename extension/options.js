@@ -1158,11 +1158,15 @@ $('delGo').onclick = async () => {
     const started = new Date();
     const pad = (x) => String(x).padStart(2, '0');
     const dest = `removed-chats/${started.getFullYear()}-${pad(started.getMonth() + 1)}-${pad(started.getDate())} ${pad(started.getHours())}.${pad(started.getMinutes())}`;
+    // A chat read on an app's web page: what its reader brought in is
+    // forgotten too (webdone:…), so reading it there again brings it back.
+    const webId = gone ? null : (await jsonAt(dir, `${row.folder}/messages.json`))?.web_id;
     let removed = [];
     if (!gone) {
       say('Moving its files…');
       removed = await moveTree(dir, row.folder, `${dest}/${row.folder.split('/').pop()}`);
     }
+    if (webId) { await chrome.storage.local.remove(`webdone:${GMLib.serviceOf(row)}:${webId}`); await GMLib.webMediaDropChat(GMLib.serviceOf(row), webId).catch(() => {}); }
     const io = libraryIO(dir);
     const rows = lib.rows.filter((r) => r !== row);
     const exclude = $('delExclude').checked && row.id;
@@ -1761,6 +1765,20 @@ async function importChat(io, rows, src, chatPath, data, report, log) {
       if (await copyIn(c)) { Object.assign(md, { file: c.file, sha256: c.sha256, width: c.width, height: c.height, source: c.source }); delete md.error; filled++; }
     }
   }
+  // A photo this import brings for a message already here as a web page
+  // reader's "not saved" note (matched by its span, [[Sources]]): the real
+  // file fills the note, so reading on the web and then bringing in the
+  // download leaves one message with the photo, not a note beside a copy.
+  for (const { to, from } of GMLib.webFills(saved, incoming)) {
+    const spare = (from.media || []).filter((o) => o.file);
+    for (const md of to.media || []) {
+      if (md.file) continue;
+      const k = spare.findIndex((o) => o.kind === md.kind);
+      if (k < 0) continue;
+      const c = { ...spare[k] };
+      if (await copyIn(c)) { Object.assign(md, { file: c.file, sha256: c.sha256, width: c.width, height: c.height, source: c.source }); delete md.error; delete md.skipped; spare.splice(k, 1); filled++; }
+    }
+  }
   let contact = libData?.contact || null;
   if (!contact && data.contact?.people) {
     contact = { ...data.contact, people: [] };
@@ -2177,10 +2195,12 @@ async function renderApps() {
     const regs = await chrome.scripting.getRegisteredContentScripts().catch(() => []);
     const kept = await chrome.storage.local.get(null);
     for (const m of all.filter((x) => x.web)) {
-      const keys = Object.keys(kept).filter((k) => k.startsWith(`webcap:${m.id}:`));
+      // Counted as they'd come in: each message once.
+      const caps = Object.keys(kept).filter((k) => k.startsWith(`webcap:${m.id}:`)).map((k) => kept[k]);
+      const src = caps.length ? GMImport.webSource(m.id, caps) : null;
       web.set(m.id, {
-        on: regs.some((r) => r.id === `web-${m.id}`) && await chrome.permissions.contains({ origins: m.web.origins }),
-        chats: keys.length, messages: keys.reduce((n, k) => n + Object.keys(kept[k]?.items || {}).length, 0),
+        on: !!kept.webReaders?.[m.id] && regs.some((r) => r.id === `web-${m.id}`) && await chrome.permissions.contains({ origins: m.web.origins }),
+        chats: src?.chats.length || 0, messages: src ? src.chats.reduce((n, k) => n + src.chat(k).data.messages.length, 0) : 0,
       });
     }
   }
@@ -2189,7 +2209,7 @@ async function renderApps() {
     if (!w) return '';
     return `<div class="web-read">
       <label class="check"><input type="checkbox" data-web="${esc(m.id)}"${w.on ? ' checked' : ''}> Keep the chats I open on ${esc(m.web.label)}</label>
-      <p class="secondary">Its download has only saved messages, so this keeps the others as you read them there. It only reads the page: no clicks, no Snaps opened, nothing saved in ${esc(m.label)}, no screenshots. Reload ${esc(m.web.label)} after turning it on.${w.messages ? ` <b>${w.messages.toLocaleString()} message${w.messages === 1 ? '' : 's'} from ${w.chats.toLocaleString()} chat${w.chats === 1 ? '' : 's'} waiting.</b>` : ''}</p>
+      <p class="secondary">Its download has only saved messages, so this keeps the others as you read them there, with the photos you scroll past. It only reads the page itself: no clicks, no Snaps opened, nothing saved in ${esc(m.label)}, no screenshots.${w.messages ? ` <b>${w.messages.toLocaleString()} message${w.messages === 1 ? '' : 's'} from ${w.chats.toLocaleString()} chat${w.chats === 1 ? '' : 's'} waiting.</b>` : ''}</p>
       ${w.messages ? `<button class="filled small" data-webin="${esc(m.id)}">Put them in my archive</button>` : ''}
     </div>`;
   };
@@ -2224,15 +2244,17 @@ $('appCards').addEventListener('change', async (e) => {
 
 // Turns an app's web page reader on or off: Chrome is asked to let the
 // extension read that site (an optional permission, asked only here, on the
-// click), and the reader is registered for its pages; off, it's unregistered
-// and the permission given back.
+// click), it's noted as on (`webReaders`), and the background registers it
+// for the site's pages and starts it in the ones open (startWebReaders); off,
+// it's unregistered and the permission given back.
 async function setWebReader(m, on) {
-  const id = `web-${m.id}`;
   if (on && !(await chrome.permissions.request({ origins: m.web.origins }))) return false;
-  await chrome.scripting.unregisterContentScripts({ ids: [id] }).catch(() => {});
-  if (!on) { await chrome.permissions.remove({ origins: m.web.origins }).catch(() => {}); return false; }
-  await chrome.scripting.registerContentScripts([{ id, matches: m.web.matches, js: [m.web.script], runAt: 'document_idle', persistAcrossSessions: true }]);
-  return true;
+  const { webReaders = {} } = await chrome.storage.local.get('webReaders');
+  await chrome.storage.local.set({ webReaders: { ...webReaders, [m.id]: on } });
+  if (!on) await chrome.permissions.remove({ origins: m.web.origins }).catch(() => {});
+  const r = await chrome.runtime.sendMessage({ type: 'gm-web-readers' });
+  if (!r?.ok) throw new Error(r?.error || `Couldn’t start reading ${m.web.label}.`);
+  return on;
 }
 
 // Puts what an app's web page reader kept (webcap:<service>:*, background.js)
@@ -2246,7 +2268,12 @@ async function bringInWeb(service) {
     const kept = await chrome.storage.local.get(null);
     const keys = Object.keys(kept).filter((k) => k.startsWith(`webcap:${service}:`));
     if (!keys.length) { note('Nothing is waiting.'); return; }
-    const src = GMImport.webSource(service, keys.map((k) => kept[k]));
+    const caps = keys.map((k) => kept[k]);
+    // The bytes of the photos the reader saved (IndexedDB, by content hash).
+    const ids = new Set();
+    for (const c of caps) for (const it of Object.values(c.items || {})) for (const md of it.media || []) if (md.hash) ids.add(`${service}:${md.hash}`);
+    const media = ids.size ? await GMLib.webMediaGet([...ids]) : new Map();
+    const src = GMImport.webSource(service, caps, media);
     const rows = (await getLib(true)).rows || [];
     const accounts = await readAccounts(libraryIO(dir));
     await resolveAccounts([src], rows, accounts, askSameAccount);

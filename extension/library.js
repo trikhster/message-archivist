@@ -480,30 +480,169 @@ globalThis.GMLib = globalThis.GMLib || (() => {
   const sigOf = (m) => `${m.timestamp}|${m.sender}|${m.text}|${(m.media || []).length + (m.gif_previews_skipped || m.previews_skipped || 0) + (m.duplicates_removed || 0)}`;
   const keyOf = (m) => m.id || sigOf(m);
 
-  function unknownIn(saved, scraped) {
+  // What in `scraped` isn't in `saved` yet, by ID then by signature.
+  // Messages read from an app's web page carry the span they were sent in
+  // (`web_window`, [from, to] ms: there, only a group's first message shows
+  // its time, so all of a group's share its minute) and aren't matched by
+  // their minute: photos sent together would all be one.
+  function newByKey(saved, scraped) {
     const ids = new Set(saved.map((m) => m.id).filter(Boolean));
-    const sigs = new Set(saved.map(sigOf));
-    const left = scraped.filter((m) => !(m.id && ids.has(m.id)) && !sigs.has(sigOf(m)));
-    // Messages read from an app's web page carry the span they were sent in
-    // (`web_window`, [from, to] ms: there, only a group's first message shows
-    // its time). Between those and the app's own export, two messages are the
-    // same when they're from the same side with the same words (or are both
-    // only a photo) and one's time is in the other's span, give or take a
-    // minute; each stands in for one other only.
-    if (!left.length || !(left.some((m) => m.web_window) || saved.some((m) => m.web_window))) return left;
+    const sigs = new Set(saved.filter((m) => !m.web_window).map(sigOf));
+    const claimed = new Set();
+    const left = scraped.filter((m) => {
+      if (m.id && ids.has(m.id)) { claimed.add(m.id); return false; }
+      return !!m.web_window || !sigs.has(sigOf(m));
+    });
+    return { left, claimed };
+  }
+
+  // Pairs messages a web page's span (`web_window`) says are the same as a
+  // message from an export (or the other way round): same side, same words
+  // (or both only a photo), and one's exact time inside the other's span,
+  // give or take a minute. Each saved message stands in for one only, and not
+  // for one already matched by ID (`claimed`). Returns a Map scraped → saved.
+  function loosePairs(saved, left, claimed) {
+    const pairs = new Map();
+    if (!left.length || !(left.some((m) => m.web_window) || saved.some((m) => m.web_window))) return pairs;
     const keyed = (m) => `${m.direction}|${normText(m.text) || ((m.media || []).length ? '\u0000photo' : '')}`;
     const pool = new Map();
-    for (const s of saved) { const k = keyed(s); if (!pool.has(k)) pool.set(k, []); pool.get(k).push(s); }
+    for (const s of saved) {
+      if (s.id && claimed.has(s.id)) continue;
+      const k = keyed(s);
+      if (!pool.has(k)) pool.set(k, []);
+      pool.get(k).push(s);
+    }
     const ms = (m) => Date.parse(m.timestamp_raw || '');
     const within = (m, w) => !!w && Number.isFinite(ms(m)) && ms(m) >= w[0] - 60e3 && ms(m) <= w[1] + 60e3;
-    return left.filter((m) => {
+    for (const m of left) {
       const list = pool.get(keyed(m)) || [];
       const i = list.findIndex((s) => within(s, m.web_window) || within(m, s.web_window));
-      if (i < 0) return true;
-      list.splice(i, 1);
-      return false;
-    });
+      if (i >= 0) { pairs.set(m, list[i]); list.splice(i, 1); }
+    }
+    return pairs;
   }
+
+  function unknownIn(saved, scraped) {
+    const { left, claimed } = newByKey(saved, scraped);
+    const pairs = loosePairs(saved, left, claimed);
+    return left.filter((m) => !pairs.has(m));
+  }
+
+  // The photo files an export brings for messages already in the library as a
+  // web page reader's "not saved" notes (its placeholder has no file; the
+  // export's match, dropped by `unknownIn`, has one). So bringing in the
+  // download after reading on the web fills the real photos into the notes,
+  // whichever order they come. Each is `{ to: the note, from: the export's }`.
+  function webFills(saved, scraped) {
+    const { left, claimed } = newByKey(saved, scraped);
+    const pairs = loosePairs(saved, left, claimed);
+    const fills = [];
+    for (const [from, to] of pairs) {
+      if ((to.media || []).some((md) => !md.file) && (from.media || []).some((md) => md.file)) fills.push({ to, from });
+    }
+    return fills;
+  }
+
+  // What an app's web page reader (web/<app>.js) keeps for a chat: items
+  // { key, at, from, to, me, sender, text, media, visit }, by key. The page
+  // shows no message IDs, so a key is the group's first time and the place in
+  // it, and a group's first time moves when older messages load above it and
+  // join it. One message is then two keys.
+  const webSig = (it) => [it.me ? 1 : 0, it.me ? '' : it.sender || '', (it.media || []).length, it.text || ''].join('\u0000');
+  const webPlace = (it) => [it.me ? 1 : 0, it.me ? '' : it.sender || '', it.from, it.at].join('\u0000');
+  const spansMeet = (a, b) => (a.from ?? a.at) <= (b.to ?? Infinity) + 60e3 && (b.from ?? b.at) <= (a.to ?? Infinity) + 60e3;
+
+  // A new read of the whole open chat into what's kept. Within one visit to
+  // the page (`visit`: when it loaded), the newest read is the truth for what
+  // it shows: a message kept under another key since is replaced, not kept
+  // twice. The same message is from the same side and sender with the same
+  // words and media in an overlapping span (give or take a minute), or at the
+  // same place in the same group (its words or media filled in); each old
+  // copy stands in for one only. What an earlier visit kept changes only by
+  // its own key: what's gone from the page since can look just like what's
+  // still there (photos), so those are matched when they're brought in.
+  function keepWebRead(kept, items, visit) {
+    const out = { ...kept };
+    const seen = new Set(items.filter((it) => kept[it.key]).map((it) => it.key));
+    const bySig = new Map();
+    const byPlace = new Map();
+    const add = (m, k, key) => (m.get(k) || m.set(k, []).get(k)).push(key);
+    for (const [key, it] of Object.entries(kept)) {
+      if (it.visit !== visit || seen.has(key)) continue;
+      add(bySig, webSig(it), key);
+      add(byPlace, webPlace(it), key);
+    }
+    const taken = new Set();
+    const claim = (keys, ok) => {
+      const key = (keys || []).find((k) => !taken.has(k) && ok(kept[k]));
+      if (key) { taken.add(key); delete out[key]; }
+      return key;
+    };
+    for (const it of items) {
+      if (!seen.has(it.key)) claim(bySig.get(webSig(it)), (s) => spansMeet(s, it)) || claim(byPlace.get(webPlace(it)), () => true);
+      out[it.key] = { ...out[it.key], ...it, visit };
+    }
+    return out;
+  }
+
+  // One visit's items, each message once (what a reader that sent only what
+  // was new kept, before keepWebRead). A group read again after older
+  // messages joined it (its start earlier) or after it split in two (the
+  // later part's start later) keeps its end, the next group's time: copies
+  // with the same side, sender, words, media and end but other starts are
+  // one message, and the start with the most of them stays (the reading
+  // that had them all; on a tie, the earliest). Then one message to a place
+  // in a group: the fullest read of it (its words or media filled in).
+  function oneWebCopy(items) {
+    const setOf = (it) => `${webSig(it)}\u0000${it.to ?? ''}`;
+    const sets = new Map();
+    for (const it of items) {
+      const byFrom = sets.get(setOf(it)) || sets.set(setOf(it), new Map()).get(setOf(it));
+      byFrom.set(it.from, (byFrom.get(it.from) || 0) + 1);
+    }
+    const best = new Map([...sets].map(([k, byFrom]) => [k, [...byFrom].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0]]));
+    const once = items.filter((it) => best.get(setOf(it)) === it.from);
+    const size = (it) => (it.media || []).length * 1e6 + (it.text || '').length;
+    const fullest = new Map();
+    for (const it of once) if (!fullest.has(webPlace(it)) || size(it) > size(fullest.get(webPlace(it)))) fullest.set(webPlace(it), it);
+    return once.filter((it) => fullest.get(webPlace(it)) === it);
+  }
+
+  // A web page reader's media bytes (web/<app>.js reads the photos the owner
+  // scrolls past, straight from the page's own blobs/cache), kept in
+  // IndexedDB, not chrome.storage: Settings reads the whole of storage.local
+  // to count what's waiting, and media would make that huge. One row per
+  // content hash (`<service>:<hash>`), so the same photo in many messages is
+  // one row; `chat` is the page chat it was seen in, for clearing on delete.
+  // Only the background (writing) and Settings (reading, clearing) call these;
+  // the reader sends bytes by message, and Node never has indexedDB.
+  const WEBMEDIA_DB = 'ma-web-media';
+  const webMediaOpen = () => new Promise((resolve, reject) => {
+    const r = indexedDB.open(WEBMEDIA_DB, 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('media')) r.result.createObjectStore('media', { keyPath: 'id' }); };
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+  const webMediaDo = (mode, run) => webMediaOpen().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction('media', mode);
+    let result;
+    run(tx.objectStore('media'), (v) => { result = v; });
+    tx.oncomplete = () => { db.close(); resolve(result); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  }));
+  const req = (r, out, map = (x) => x) => { r.onsuccess = () => out(map(r.result)); };
+  // Keeps one photo/video (`{ id: '<service>:<hash>', service, chat, kind, type, blob }`).
+  const webMediaPut = (rec) => webMediaDo('readwrite', (s) => s.put(rec));
+  // The blobs for a set of `<service>:<hash>` ids, as a Map id → record.
+  const webMediaGet = (ids) => webMediaDo('readonly', (s, out) => {
+    const got = new Map();
+    for (const id of ids) req(s.get(id), (rec) => { if (rec) got.set(id, rec); });
+    out(got);
+  }).then((m) => m || new Map());
+  // Forgets a page chat's media (on deleting the chat from the backup).
+  const webMediaDropChat = (service, chat) => webMediaDo('readwrite', (s) => {
+    s.getAll().onsuccess = (e) => { for (const rec of e.target.result || []) if (rec.service === service && rec.chat === chat) s.delete(rec.id); };
+  });
 
   // Merges new records into the saved ones by time. Equal times keep their
   // on-screen order; undated messages stay next to the message before them.
@@ -1245,7 +1384,7 @@ thumbnail. RCS photos are full size; SMS/MMS photos are compressed by the carrie
     SERVICES, addModule, modules, module: moduleOf, serviceOf, serviceLabel, appFolder, chatFolder, importedRecord, pageFiles, accountKey, accountOf, sameAccount, accountLabel,
     PEOPLE_VERSION, chatKey, isGroupChat, isPersonChat, personIds, personName, nameKey, people, peopleSaved, joinPeople, keepApart, splitChat, renamePerson,
     CHAT_KINDS, TRAITS_VERSION, chatTraits, traitsCurrent, senderOf, chatKind, chatKindFor, skipKinds,
-    INDEX_VERSION, sigOf, keyOf, unknownIn, mergeChrono, imageFingerprint, sameImage, betterCopy,
+    INDEX_VERSION, sigOf, keyOf, unknownIn, webFills, keepWebRead, oneWebCopy, webMediaPut, webMediaGet, webMediaDropChat, mergeChrono, imageFingerprint, sameImage, betterCopy,
     MEDIA_STATUS, mediaStatus, mediaIndex, mediaCounts, mediaIndexCsv,
     compactMessages, chatScript, contactSummary, chatCsv, joinCsv,
     checkChat, STATUS_LABEL, verificationOf, summarize, indexScript, parseIndex, readLibrary,

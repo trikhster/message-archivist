@@ -43,7 +43,9 @@ Sent with `chrome.runtime.sendMessage`.
 | `gm-open-messages` | popup, options | | focuses or opens Google Messages |
 | `gm-open-settings` | content, viewer | `{ hash? }` | opens `options.html#hash` (`folder`, `welcome`, `delete:<folder>`) |
 | `gm-clear-badge` | popup | | |
-| `gm-web-capture` | an app's web page reader (`web/snapchat.js`) | `{ service, chat: { id, title, people, group }, items[] }` | keeps what it read of the open chat in `webcap:<service>:<chat id>` (only from that app's own pages; keys in `webdone` skipped); replies `{ ok }` |
+| `gm-web-capture` | an app's web page reader (`web/snapchat.js`) | `{ service, visit, chat: { id, title, people, group }, items[] }`: the whole open chat, when it's changed; `visit` is when the page loaded | keeps it in `webcap:<service>:<chat id>` (only from that app's own pages; keys in `webdone` skipped), the read replacing what the same visit read before (`GMLib.keepWebRead`); replies `{ ok }` |
+| `gm-web-readers` | Settings (`setWebReader`) | — | registers the web page readers turned on (`webReaders`) and unregisters the rest, and starts them in pages already open (`startWebReaders`); replies `{ ok }` |
+| `gm-web-media` | an app's web page reader (`web/snapchat.js`) | `{ service, chatId, hash, kind, mime, b64 }`: a photo/video the reader read from a page blob, base64 | keeps the bytes in IndexedDB by `<service>:<hash>` (`storeWebMedia` → `GMLib.webMediaPut`; only from that app's own pages, size-capped); replies `{ ok }` |
 
 ## Inside the page
 - `gm-writer-init`: `postMessage` from the content script to the writer frame, carrying a `MessageChannel` port. After that the port carries `{ id, op, args }` → `{ id, ok, result | error, name }`. Ops: `status`, `exists`, `readText`, `write`, `remove`, `list`, `ask`, and from 0.5.0.0 `joinCsv` and `fetch`. See [[Writer frame]].

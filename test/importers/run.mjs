@@ -416,6 +416,110 @@ const mine = (d) => d.messages.filter((m) => m.direction === 'sent');
   check('Messages without spans merge as before', G.unknownIn(exported, [G.importedRecord({ id: 'y', at: t0 + 6 * 60e3 + 120e3, sender: 'Sky W', text: 'are you up' })]).length === 1);
 }
 
+// ---------- a chat read again as older messages load (GMLib.keepWebRead) ----------
+{
+  // The page keys a message by its group's first time and its place in the
+  // group. Scrolling up loads older messages; when they're from the same
+  // person as the oldest group on screen, they join it, and its first time
+  // and every place in it change.
+  const T0 = Date.UTC(2024, 3, 20, 9, 0, 0);
+  const T1 = T0 + 5 * 60e3; // where the oldest group on screen started before
+  const T2 = T0 + 30 * 60e3; // the next group (yours)
+  const key = (from, k, text, media = 0) => `${from}|${k}|${text}|${media}`;
+  const msg = (from, k, text, extra = {}) => ({ key: key(from, k, text, extra.media?.length || 0), at: from + k, from, to: T2, me: false, sender: 'Sky W', text, media: [], ...extra });
+  const mine = (k, text) => ({ key: key(T2, k, text), at: T2 + k, from: T2, to: null, me: true, sender: '', text, media: [] });
+  const V = 1000;
+  const first = [msg(T1, 0, 'ok'), msg(T1, 1, 'ok'), msg(T1, 2, 'see you'), mine(0, 'bye')];
+  const second = [msg(T0, 0, 'older one'), msg(T0, 1, 'ok'), msg(T0, 2, 'ok'), msg(T0, 3, 'see you'), mine(0, 'bye')];
+  let kept = G.keepWebRead({}, first, V);
+  kept = G.keepWebRead(kept, second, V);
+  const texts = (k) => Object.values(k).sort((a, b) => a.at - b.at).map((it) => it.text).join('|');
+  check('Snapchat for Web: a group read again with older messages joined is kept once, under its new keys', Object.keys(kept).length === 5 && texts(kept) === 'older one|ok|ok|see you|bye' && Object.values(kept).every((it) => it.from !== T1 && it.visit === V));
+  check('…the same words twice in a row stay twice', Object.values(kept).filter((it) => it.text === 'ok').length === 2);
+  const filled = G.keepWebRead(kept, second.map((it) => (it.text === 'see you' ? { ...it, key: key(T0, 3, 'see you', 1), media: [{ kind: 'image' }] } : it)), V);
+  check('…a message whose photo filled in replaces itself, by its place', Object.keys(filled).length === 5 && Object.values(filled).find((it) => it.text === 'see you').media.length === 1);
+  check('…and the same read again changes nothing', JSON.stringify(G.keepWebRead(kept, second, V)) === JSON.stringify(kept));
+
+  // A later visit: a photo seen before is gone (Snapchat deletes what's been
+  // viewed), so the photos after it move up a place. What the earlier visit
+  // kept isn't matched against it; bringing them in is.
+  const photo = (from, k, to) => ({ key: key(from, k, '', 1), at: from + k, from, to, me: false, sender: 'Sky W', text: '', media: [{ kind: 'image' }] });
+  const P = T0 + 60 * 60e3;
+  const P9 = P + 10 * 60e3;
+  let both = G.keepWebRead({}, [photo(P, 0, P9), photo(P, 1, P9)], V);
+  both = G.keepWebRead(both, [photo(P, 0, P9)], V + 1);
+  check('Snapchat for Web: a later visit doesn’t replace what an earlier one kept', Object.keys(both).length === 2 && Object.values(both).filter((it) => it.visit === V).length === 1);
+  const moved = { ...photo(P + 1, 0, P9), visit: V + 1 }; // the second photo, now first in its group
+  const cap = (items) => ({ chat: { id: '0f0e0d0c-0b0a-4909-8807-0605040302aa', title: 'Sky W', people: ['Sky W'] }, updated_at: P9, items: Object.fromEntries(items.map((it) => [it.key, it])) });
+  const brought = (items) => { const s = I.webSource('snapchat', [cap(items)]); return s.chat(s.chats[0]).data.messages; };
+  check('…and bringing them in matches the later visit’s copy to the earlier one', brought([{ ...photo(P, 0, P9), visit: V }, { ...photo(P, 1, P9), visit: V }, moved]).length === 2);
+
+  // Photos sent together share their group's minute on the page.
+  const three = brought([0, 1, 2].map((k) => ({ ...photo(P, k, P9), visit: V })));
+  const five = brought([0, 1, 2, 3, 4].map((k) => ({ ...photo(P, k, P9), visit: V })));
+  check('Snapchat for Web: photos sent together are each their own message', three.length === 3 && five.length === 5);
+  check('…and two more read later come in, though the first three are in already', G.unknownIn(three, five).length === 2);
+  const downloaded = [0, 1, 2, 3].map((n) => G.importedRecord({ id: `sc-p${n}`, at: P + n * 1000, sender: 'Sky W', media: [{ kind: 'image', file: `media/p${n}.jpg` }] }));
+  check('…and a download’s photos from that minute aren’t all taken for one seen on the page', G.unknownIn(three, downloaded).length === 1);
+
+  // Kept by the first reader (only what was new, no visit): a group read
+  // three times as older messages loaded. Brought in once each.
+  const legacy = [msg(T1 + 60e3, 0, 'ok'), msg(T1 + 60e3, 1, 'see you'), msg(T1, 0, 'ok'), msg(T1, 1, 'ok'), msg(T1, 2, 'see you'), ...second];
+  check('Snapchat for Web: what the first reader kept twice comes in once', brought(legacy).map((m) => m.text).join('|') === 'older one|ok|ok|see you|bye');
+  const linked = [...legacy, msg(T0, 3, 'see you there', { key: 'filled' })];
+  check('…and a message whose words filled in, in its fullest read', brought(linked).map((m) => m.text).join('|') === 'older one|ok|ok|see you there|bye');
+}
+
+// ---------- a download's photo fills a web reader's "not saved" note (GMLib.webFills) ----------
+{
+  const t0 = Date.UTC(2024, 5, 1, 12, 0, 0);
+  const span = [t0, t0 + 10 * 60e3];
+  const note = (extra) => ({ kind: 'image', file: null, skipped: 'not saved: seen on Snapchat for Web', ...extra });
+  const webPhoto = { ...G.importedRecord({ id: 'web-x', at: t0, sender: 'Sky W', media: [note()] }), web_window: span };
+  const webText = { ...G.importedRecord({ id: 'web-y', at: t0, sender: 'Sky W', text: 'hi' }), web_window: span };
+  const dlPhoto = G.importedRecord({ id: 'sc-1', at: t0 + 3 * 60e3, sender: 'Sky W', media: [{ kind: 'image', file: 'media/p.jpg' }] });
+  const dlOther = G.importedRecord({ id: 'sc-2', at: t0 + 3 * 60e3, sender: 'Sky W', media: [{ kind: 'image', file: 'media/q.jpg' }] });
+
+  // Read on the web first, download brought in after.
+  const fills = G.webFills([webPhoto, webText], [dlPhoto]);
+  check('webFills: the download’s photo fills a web note of the same photo', fills.length === 1 && fills[0].to === webPhoto && fills[0].from === dlPhoto);
+  check('…and unknownIn drops that download photo, so the note is filled, not doubled', G.unknownIn([webPhoto, webText], [dlPhoto]).length === 0);
+  check('…a text-only note isn’t a photo fill', G.webFills([webText], [G.importedRecord({ id: 'z', at: t0 + 60e3, sender: 'Sky W', text: 'hi' })]).length === 0);
+
+  // Download first, read on the web after: the saved file stays, the note is dropped.
+  check('webFills: nothing to fill when the photo is already saved', G.webFills([dlPhoto], [webPhoto]).length === 0);
+  check('…and the web note is dropped, keeping the saved file', G.unknownIn([dlPhoto], [webPhoto]).length === 0);
+
+  // A web photo the download doesn’t have stays a note.
+  check('…a web photo the download lacks stays a note', G.unknownIn([dlPhoto], [{ ...webPhoto, web_window: [t0 + 60 * 60e3, t0 + 70 * 60e3] }]).length === 1);
+  // One note is filled from one file only; a second download photo is its own message.
+  check('…each note is filled from one file only', G.webFills([webPhoto], [dlPhoto, dlOther]).length === 1 && G.unknownIn([webPhoto], [dlPhoto, dlOther]).length === 1);
+}
+
+// ---------- a web reader's saved photo becomes a real media file ----------
+{
+  const t0 = Date.UTC(2024, 6, 1, 9, 0, 0);
+  const media = new Map([['snapchat:deadbeef12', { type: 'image/jpeg', kind: 'image', blob: new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: 'image/jpeg' }) }]]);
+  const capture = {
+    chat: { id: '0f0e0d0c-0b0a-4909-8807-0605040302bb', title: 'Sky W', people: ['Sky W'] },
+    updated_at: t0 + 60e3,
+    items: {
+      a: { key: 'a', at: t0, from: t0, to: null, me: false, sender: 'Sky W', text: '', media: [{ kind: 'image', hash: 'deadbeef12' }] },
+      b: { key: 'b', at: t0 + 1, from: t0, to: null, me: false, sender: 'Sky W', text: '', media: [{ kind: 'image', hash: 'notkept99' }] },
+      c: { key: 'c', at: t0 + 2, from: t0, to: null, me: true, sender: '', text: '', media: [{ kind: 'image', sticker: true }] },
+    },
+  };
+  const src = I.webSource('snapchat', [capture], media);
+  const d = src.chat(src.chats[0]).data;
+  const saved = d.messages.find((m) => m.media[0]?.file);
+  check('Snapchat for Web: a photo whose bytes were read becomes a real media file', !!saved && /^media\/photo \d+\.jpg$/.test(saved.media[0].file) && d.media_count === 1);
+  check('…a photo with no saved bytes stays a “not saved” note', d.messages.some((m) => m.media[0] && !m.media[0].file && /not saved: seen on Snapchat for Web/.test(m.media[0].skipped)));
+  check('…a sticker stays a note', d.messages.some((m) => m.media[0] && /sticker/.test(m.media[0].skipped || '')));
+  const blob = await src.read(`${src.chats[0]}/${saved.media[0].file}`);
+  check('…and the source serves the saved bytes', !!blob && blob.size === 5 && blob.type === 'image/jpeg');
+  check('Snapchat for Web: counting without the bytes keeps photos as notes', I.webSource('snapchat', [capture]).chat(src.chats[0]).data.media_count === 0);
+}
+
 // ---------- the modules themselves ----------
 {
   const ids = G.modules().map((m) => m.id);

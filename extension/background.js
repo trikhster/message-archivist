@@ -3,8 +3,11 @@
 //  - puts date-range zips into the chosen subfolder of Downloads
 //  - runs scheduled exports/updates in the open Messages tab
 //  - relays actions from the settings page to that tab
+//  - keeps what apps' web page readers read, and starts those readers
 
 importScripts('library.js'); // GMLib: shared settings defaults
+// The app modules, as the content script lists them: which apps have a web page reader.
+importScripts(...chrome.runtime.getManifest().content_scripts[0].js.filter((f) => f.startsWith('modules/')));
 
 const MESSAGES_URL = 'https://messages.google.com/web/*';
 
@@ -47,10 +50,11 @@ async function migrateSettings() {
 chrome.runtime.onInstalled.addListener((details) => {
   ensureAlarm();
   migrateSettings();
+  startWebReaders(true);
   // First install: walk through choosing the backup folder.
   if (details.reason === 'install') chrome.tabs.create({ url: chrome.runtime.getURL('options.html#welcome') });
 });
-chrome.runtime.onStartup.addListener(() => { ensureAlarm(); migrateSettings(); });
+chrome.runtime.onStartup.addListener(() => { ensureAlarm(); migrateSettings(); startWebReaders(false); });
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'gm-schedule') runDue(); });
 
 async function messagesTab() {
@@ -358,28 +362,82 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       // open there, kept until Settings brings it into the archive.
       saveCapture(msg, sender).then(() => reply({ ok: true }), (e) => reply({ ok: false, error: e.message }));
       return true;
+    case 'gm-web-media':
+      // A photo/video that reader read from the page (a blob the page held),
+      // kept in IndexedDB by its content hash until it's brought in.
+      storeWebMedia(msg, sender).then(() => reply({ ok: true }), (e) => reply({ ok: false, error: e.message }));
+      return true;
+    case 'gm-web-readers':
+      // Settings turned a web page reader on or off (`webReaders`).
+      startWebReaders(true).then(() => reply({ ok: true }), (e) => reply({ ok: false, error: e.message }));
+      return true;
   }
   return false;
 });
 
 // ---------- captures from apps' web pages ----------
 // An app module with a web page reader (modules/<app>.js `web`, its script in
-// web/) sends what it reads of the chat open there. Each chat is kept apart,
-// `webcap:<service>:<chat id>` = { chat, items: { <key>: item }, updated_at },
-// an item replacing the one with its key (read again, or edited), until
-// Settings' Apps tab puts them in the archive; the keys it put there are kept
+// web/) sends the whole chat open there each time it changes, with when the
+// page loaded (`visit`). Each chat is kept apart, `webcap:<service>:<chat id>`
+// = { chat, items: { <key>: item }, updated_at }, a read replacing what the
+// same visit read before (GMLib.keepWebRead), until Settings' Apps tab puts
+// them in the archive; the keys it put there are kept
 // (`webdone:<service>:<chat id>`), so reading the chat again doesn't queue them again.
-async function saveCapture({ service, chat, items }, sender) {
+async function saveCapture({ service, visit, chat, items }, sender) {
   const m = { snapchat: 'https://www.snapchat.com/web' }[service];
   if (!m || !String(sender?.url || '').startsWith(m)) throw new Error('not from that app’s web page');
-  if (!chat?.id || !/^[\w-]{1,80}$/.test(chat.id) || !Array.isArray(items)) throw new Error('not a capture');
+  if (!chat?.id || !/^[\w-]{1,80}$/.test(chat.id) || !Array.isArray(items) || !Number.isFinite(visit)) throw new Error('not a capture');
   const key = `webcap:${service}:${chat.id}`;
   const doneKey = `webdone:${service}:${chat.id}`;
   const got = await chrome.storage.local.get([key, doneKey]);
   const was = got[key] || { items: {} };
   const done = new Set(got[doneKey] || []);
-  const fresh = items.filter((it) => it?.key && !done.has(it.key));
-  if (!fresh.length) return;
-  for (const it of fresh) was.items[it.key] = { ...was.items[it.key], ...it };
-  await chrome.storage.local.set({ [key]: { chat: { ...was.chat, ...chat }, items: was.items, updated_at: Date.now() } });
+  const read = items.filter((it) => it?.key && !done.has(it.key));
+  if (!read.length) return;
+  await chrome.storage.local.set({ [key]: { chat: { ...was.chat, ...chat }, items: GMLib.keepWebRead(was.items, read, visit), updated_at: Date.now() } });
+}
+
+// A photo or video a web page reader read from the page (gm-web-media): its
+// bytes, kept in IndexedDB (GMLib.webMediaPut) by content hash so the same
+// photo in many messages is one copy, until Settings brings the chat in.
+async function storeWebMedia({ service, chatId, hash, kind, mime, b64 }, sender) {
+  const m = { snapchat: 'https://www.snapchat.com/web' }[service];
+  if (!m || !String(sender?.url || '').startsWith(m)) throw new Error('not from that app’s web page');
+  if (!chatId || !/^[\w-]{1,80}$/.test(chatId) || !/^[0-9a-f]{8,64}$/.test(hash || '') || typeof b64 !== 'string') throw new Error('not media');
+  const bin = atob(b64);
+  if (bin.length > 24 * 1024 * 1024) throw new Error('too big');
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  await GMLib.webMediaPut({ id: `${service}:${hash}`, service, chat: chatId, kind: kind === 'video' ? 'video' : 'image', type: mime || '', blob: new Blob([bytes], { type: mime || 'application/octet-stream' }) });
+}
+
+// The web page readers turned on in Settings → Apps (`webReaders`, and Chrome
+// still lets the extension read the site) are registered for their pages;
+// the others aren't. When one's turned on, or after an update (which cuts
+// the readers in open pages off, and may drop what was registered), the
+// pages already open get it at once too.
+async function startWebReaders(openPages) {
+  const { webReaders = {} } = await chrome.storage.local.get('webReaders');
+  const regs = await chrome.scripting.getRegisteredContentScripts().catch(() => []);
+  let note = false;
+  for (const m of GMLib.modules().filter((x) => x.web)) {
+    const id = `web-${m.id}`;
+    const has = regs.some((r) => r.id === id);
+    const granted = await chrome.permissions.contains({ origins: m.web.origins }).catch(() => false);
+    // Before `webReaders` was the record, a reader was on if its script was
+    // registered; keep such a reader on through the update rather than
+    // silently dropping it.
+    if (webReaders[m.id] === undefined && has && granted) { webReaders[m.id] = true; note = true; }
+    const on = !!webReaders[m.id] && granted;
+    if (!on) {
+      if (has) await chrome.scripting.unregisterContentScripts({ ids: [id] }).catch(() => {});
+      continue;
+    }
+    if (!has) await chrome.scripting.registerContentScripts([{ id, matches: m.web.matches, js: [m.web.script], runAt: 'document_idle', persistAcrossSessions: true }]);
+    if (!openPages) continue;
+    for (const t of await chrome.tabs.query({ url: m.web.matches }).catch(() => [])) {
+      chrome.scripting.executeScript({ target: { tabId: t.id }, files: [m.web.script] }).catch(() => {});
+    }
+  }
+  if (note) await chrome.storage.local.set({ webReaders });
 }

@@ -230,23 +230,54 @@ globalThis.GMImport = globalThis.GMImport || (() => {
   // it was sent in (`web_window`), by which merging knows it's the same as a
   // message from the app's own export (GMLib.unknownIn). The page's chat ID
   // isn't the export's, so a chat has none (kept as `web_id`) and joins the
-  // app's chat of that name. Photos and videos are noted, not saved.
-  function webSource(service, captures) {
+  // app's chat of that name. A photo or video the reader read from the page
+  // (`md.hash`, its bytes kept by the background) is saved; a sticker, or one
+  // not read, is noted. Each visit to the page's messages once
+  // (GMLib.oneWebCopy), newest visit first (its read is the fullest), then
+  // each earlier visit adds only what later ones don't have (GMLib.unknownIn:
+  // what's on the page changes between visits, and keys with it; what's gone
+  // since stays). `media` maps `<service>:<hash>` to the kept bytes.
+  const mediaExt = (type) => ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp', 'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov' }[type] || (String(type).startsWith('video') ? '.mp4' : '.jpg'));
+  function webSource(service, captures, media = new Map()) {
     const label = GMLib.serviceLabel(service);
+    const blobs = new Map(); // a file token -> its Blob, for the source's read()
     const chats = captures.filter((c) => c?.chat?.id && Object.keys(c.items || {}).length).map((c, i) => {
-      const messages = Object.values(c.items).sort((a, b) => a.at - b.at || String(a.key).localeCompare(String(b.key))).map((it) => ({
+      const files = new Map();
+      const mediaItem = (md) => {
+        const rec = md.hash && media.get(`${service}:${md.hash}`);
+        if (rec) {
+          const kind = md.kind === 'video' ? 'video' : 'image';
+          const token = `${service}:${md.hash}`;
+          const name = `media/${kind === 'video' ? 'video' : 'photo'} ${files.size + 1}${mediaExt(rec.type)}`;
+          files.set(name, token);
+          blobs.set(token, rec.blob);
+          return { kind, file: name, source: `${label} for Web` };
+        }
+        return mediaMissing(md.kind || 'image', md.sticker ? `a sticker, not saved from ${label} for Web` : `not saved: seen on ${label} for Web`);
+      };
+      const record = (it) => ({
         ...GMLib.importedRecord({
           id: stableId('web', service, c.chat.id, it.key), at: it.at, sender: it.sender, sent: !!it.me, text: it.text,
-          media: (it.media || []).map((md) => mediaMissing(md.kind || 'image', md.sticker ? `a sticker, not saved from ${label} for Web` : `not saved: seen on ${label} for Web`)),
+          media: (it.media || []).map(mediaItem),
           reply_to: it.reply || null,
         }),
         web_window: [it.from ?? it.at, it.to ?? c.updated_at ?? it.at],
-      }));
+      });
+      const visits = new Map();
+      for (const it of Object.values(c.items)) {
+        const v = Number(it.visit) || 0;
+        (visits.get(v) || visits.set(v, []).get(v)).push(it);
+      }
+      let messages = [];
+      for (const v of [...visits.keys()].sort((a, b) => b - a)) {
+        const read = GMLib.oneWebCopy(visits.get(v)).sort((a, b) => a.at - b.at || String(a.key).localeCompare(String(b.key))).map(record);
+        messages = messages.concat(messages.length ? GMLib.unknownIn(messages, read) : read);
+      }
       const people = (c.chat.people || []).map((name) => ({ name }));
       const data = chatData({ service, id: null, title: c.chat.title || people.map((p) => p.name).join(', ') || `${label} chat`, people, messages, group: !!c.chat.group });
-      return { key: `chat-${i + 1}`, files: new Map(), data: { ...data, web_id: c.chat.id } };
+      return { key: `chat-${i + 1}`, files, data: { ...data, web_id: c.chat.id } };
     });
-    return sourceOf({ name: `${label} for Web`, blob: async () => null }, { service, id: `${service}-web` }, chats, { partial: `Only what was opened on ${label} for Web.`, web: true });
+    return sourceOf({ name: `${label} for Web`, blob: async (token) => blobs.get(token) || null }, { service, id: `${service}-web` }, chats, { partial: `Only what was opened on ${label} for Web.`, web: true });
   }
 
   return {

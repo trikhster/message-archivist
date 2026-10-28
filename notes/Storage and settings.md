@@ -11,8 +11,11 @@ updated: 2026-10-26
 | `runs` | content `recordRun()`, options (imports, clean-ups) | last 30 runs: `{ at, kind, target, ok, summary, added, log[] }` |
 | `chatStatus` | background on `gm-backup-status` | per chat ID: `{ title, complete, count, oldest, status, media, at }`, read by the popup |
 | `restore` (`chrome.storage.session`) | background `compactWindow()` | per tab ID: the bounds and state of a window shrunk for a backup, given back by `gm-restore-window`. Session storage survives the worker being stopped, not a browser restart |
-| `webcap:<app>:<chat id>` | background on `gm-web-capture` | what an app's web page reader kept of one chat ([[Importers]] → Web page readers): `{ chat: { id, title, people, group }, items: { <key>: { key, at, from, to, me, sender, text, media[], reply? } }, updated_at }`, until Settings → Apps → **Put them in my archive** |
-| `webdone:<app>:<chat id>` | options `bringInWeb()` | the keys already put in the archive, so reading the chat again doesn't queue them again |
+| `webcap:<app>:<chat id>` | background on `gm-web-capture` | what an app's web page reader kept of one chat ([[Importers]] → Web page readers): `{ chat: { id, title, people, group }, items: { <key>: { key, at, from, to, me, sender, text, media[], reply?, visit } }, updated_at }`, until Settings → Apps → **Put them in my archive** (`visit`: when the page that read it loaded; missing on what the first reader kept) |
+| `webReaders` | Settings (`setWebReader`) | `{ <app>: true }`: the web page readers turned on, which the background keeps registered (`startWebReaders`). Not Chrome's permission alone: `https://*/*` may be allowed for link previews |
+| `webdone:<app>:<chat id>` | options `bringInWeb()` | the keys already put in the archive, so reading the chat again doesn't queue them again; removed when the chat is deleted from the backup |
+
+Media a web page reader read from the page isn't in `chrome.storage` (Settings reads all of it to count what's waiting, and media would make that huge): it's in an **IndexedDB** database `ma-web-media`, store `media`, one row per content hash `{ id: '<app>:<hash>', service, chat: '<page chat id>', kind, type, blob }` (`GMLib.webMediaPut`/`webMediaGet`/`webMediaDropChat`). The background writes it on `gm-web-media`; `bringInWeb` reads the rows for the hashes in the queue; deleting a web chat from the backup drops its rows.
 | `myNames` | options `whoAmI()` | per service: the names that are you in that app's exports ("Which one is you?"), e.g. `{ whatsapp: ['Alex Doe'] }` ([[Sources]]) |
 | `theme` | `theme.js` (`GMTheme.set`) | `light`, `dark` or `system`; mirrors the extension pages' choice so the progress panel on the Messages tab matches |
 
