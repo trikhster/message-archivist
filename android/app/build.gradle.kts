@@ -56,5 +56,5 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     // Clutter's rules, checked on the extension's cases (test/filters/cases.json).
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20240303")
+    testImplementation("org.json:json:20260814")
 }
