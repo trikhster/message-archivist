@@ -244,6 +244,104 @@ details summary { cursor: pointer; color: var(--primary); font: 500 13px var(--f
 .about dd { margin: 0; overflow-wrap: anywhere; }
 
 
+
+/* graph: the archive as nodes and links around one focus, with its profile beside it */
+#view-graph { flex-direction: column; padding: 0 12px 12px; --year: color-mix(in srgb, var(--c3) 62%, #000); }
+.graph-tools { padding: 4px 16px 10px; row-gap: 8px; }
+.graph-tools .trail { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-width: 0; }
+.trail .crumb { height: 32px; padding: 0 10px; border-radius: 16px; color: var(--text-2); font: 500 13px var(--font-display); }
+.trail .crumb.cur { background: var(--selected); color: var(--on-selected); pointer-events: none; }
+.trail .sep { color: var(--outline); font-size: 12px; }
+#graphFind { flex: 1 1 220px; max-width: 360px; }
+.graph-tools .chips .chip { height: 30px; padding: 0 10px; font-size: 12px; }
+.graph-body { flex: 1; min-height: 0; display: flex; gap: 8px; }
+.graph-stage { flex: 1; min-width: 0; position: relative; background: var(--bg); border-radius: 24px; overflow: hidden; }
+#graphSvg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#graphSvg.dragging { cursor: grabbing; }
+.gedge { fill: none; stroke: var(--outline-variant); opacity: .6; stroke-linecap: round; }
+.gedge.chat { stroke: var(--primary); }
+.gedge.talks { stroke: var(--c7); }
+.gedge.named { stroke: var(--c2); stroke-dasharray: 5 3; }
+.gedge.together { stroke: var(--c6); }
+.gedge.relation { stroke: var(--c5); stroke-dasharray: 2 3; }
+.gedge.member { stroke: var(--c4); }
+.gedge.active { stroke: var(--outline-variant); opacity: .4; }
+.gedge.label { stroke: var(--c5); }
+#garrow path { fill: var(--c2); }
+.gnode { cursor: pointer; outline: none; }
+/* Initials and years are sized per node, inline (the charts' svg text rule would override an attribute). */
+.gnode text { fill: var(--text-2); font-family: var(--font); pointer-events: none; }
+.gnode text.lbl, .gnode text.pill { font-size: 11px; }
+.gnode text.ini { fill: #fff; font-weight: 500; font-family: var(--font-display); text-transform: uppercase; }
+.gnode text.pill { fill: var(--text); font-weight: 500; font-family: var(--font-display); }
+.gnode .shape { transition: filter var(--dur-1) var(--ease); }
+.gnode:hover .shape, .gnode:focus-visible .shape { filter: brightness(1.12) drop-shadow(0 1px 3px rgba(0,0,0,.3)); }
+.gnode.focus .halo { fill: none; stroke: var(--primary); stroke-width: 3; }
+.gnode:focus-visible .shape { stroke: var(--primary); stroke-width: 3; }
+.gnode.focus text.lbl { fill: var(--text); font-weight: 500; }
+#graphSvg.lit .gedge:not(.lit) { opacity: .08; }
+#graphSvg.lit .gnode:not(.lit):not(.focus) { opacity: .3; }
+.graph-legend { position: absolute; left: 14px; bottom: 12px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 11px; color: var(--muted); pointer-events: none; max-width: calc(100% - 140px); }
+.graph-legend span { display: inline-flex; gap: 5px; align-items: center; }
+.graph-legend i { width: 10px; height: 10px; display: inline-block; border-radius: 50%; }
+.graph-legend i.sq { border-radius: 3px; } .graph-legend i.pill { width: 16px; border-radius: 5px; border: 1px solid var(--c7); background: var(--surface-2); }
+.graph-legend b { font-weight: 500; color: var(--text-2); }
+.graph-zoom { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 4px; }
+.graph-zoom button { width: 36px; height: 36px; padding: 0; border-radius: 50%; background: var(--surface-1); color: var(--text-2); font-size: 18px; }
+.graph-zoom button.fit { width: auto; padding: 0 12px; font-size: 13px; border-radius: 18px; }
+.graph-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 24px; background: var(--bg); }
+.graph-note p { max-width: 460px; line-height: 22px; }
+.graph-hint { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); font-size: 12px; color: var(--muted); background: color-mix(in srgb, var(--bg) 85%, transparent); padding: 4px 12px; border-radius: 12px; pointer-events: none; max-width: calc(100% - 24px); text-align: center; }
+.graph-side { width: 400px; flex: none; overflow-y: auto; background: var(--bg); border-radius: 24px; padding: 18px 20px 28px; }
+.pf-head { display: flex; gap: 14px; align-items: center; }
+.pf-head .avatar.lg { width: 56px; height: 56px; font-size: 24px; }
+.pf-head .shape-lg { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; font-size: 26px; color: #fff; flex: none; }
+.pf-title { min-width: 0; flex: 1; }
+.pf-name { font: 500 20px/26px var(--font-display); color: var(--text); overflow-wrap: anywhere; }
+.pf-sub { color: var(--muted); font-size: 12px; line-height: 17px; }
+.pf-who { margin-top: 10px; font-size: 13px; color: var(--text-2); line-height: 19px; }
+.pf-acts { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 4px; }
+.pf-sec { margin: 16px 0 0; }
+.pf-sec h3 { font: 500 12px var(--font-display); color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin: 0 0 8px; display: flex; gap: 8px; align-items: baseline; }
+.pf-sec h3 .sub { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.pf-gist { background: var(--surface-1); border-radius: 16px; padding: 12px 14px; line-height: 20px; color: var(--text); }
+.share { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--c2); margin: 10px 0 4px; }
+.share i { display: block; height: 100%; background: var(--c1); }
+.share-lab { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.pf-row { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 12px; color: var(--text); text-decoration: none; }
+a.pf-row:hover { background: var(--surface-1); text-decoration: none; }
+.pf-row .r-body { flex: 1; min-width: 0; }
+.pf-row .nm { display: block; font-weight: 500; font-size: 13px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-row .why { display: block; color: var(--muted); font-size: 12px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-row .n { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pf-bar { height: 5px; background: var(--surface-2); border-radius: 3px; margin-top: 4px; overflow: hidden; }
+.pf-bar i { display: block; height: 100%; border-radius: 3px; background: var(--c1); min-width: 2px; }
+.pf-row .sq { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: #fff; flex: none; font-size: 15px; }
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 36px; }
+.spark i { flex: 1; background: var(--c1); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .9; }
+.spark-lab { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 2px; }
+.years { display: flex; align-items: flex-end; gap: 4px; height: 70px; }
+.years .yr { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; min-width: 0; cursor: default; }
+.years .yr i { display: block; width: 100%; }
+.years .yr .s { background: var(--c1); border-radius: 0 0 2px 2px; } .years .yr .r { background: var(--c2); border-radius: 2px 2px 0 0; }
+.years-lab { display: flex; gap: 4px; font-size: 10px; color: var(--muted); margin-top: 3px; } .years-lab span { flex: 1; text-align: center; overflow: hidden; }
+.pf-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.pf-chips .chip { height: 28px; padding: 0 10px; font-size: 12px; }
+.pf-chips .chip.shared { border-color: var(--c7); color: var(--text); }
+a.chip:hover, a.button:hover, a.pf-row:hover { text-decoration: none; }
+.pf-list { margin: 0; padding: 0; list-style: none; }
+.pf-list li { margin: 0 0 6px; font-size: 13px; line-height: 19px; color: var(--text-2); }
+.pf-list li b { color: var(--text); font-weight: 500; }
+.pf-empty { color: var(--muted); font-size: 13px; }
+.pf-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+#view-graph .trail .crumb[data-id] { cursor: pointer; }
+@media (max-width: 900px) {
+  /* One scrolling column: the stage, then the whole profile under it. */
+  .graph-body { flex-direction: column; overflow-y: auto; }
+  .graph-stage { flex: none; height: 56vh; min-height: 260px; }
+  .graph-side { width: auto; flex: none; overflow: visible; }
+}
+
 /* flags */
 .time { display: flex; align-items: center; gap: 4px; }
 .flag { min-width: 0; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 14px; line-height: 1; color: var(--muted); opacity: 0; display: inline-grid; place-items: center; cursor: pointer; background: none; }
@@ -352,6 +450,7 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6
 <header>
   <div class="brand"><span class="logo">💬</span><h1>Message Archivist</h1></div>
   <nav>
+    <a href="#graph" data-view="graph">Graph</a>
     <a href="#chat" data-view="chats">Chats</a>
     <a href="#people" data-view="people">People</a>
     <a href="#contacts" data-view="contacts">Contacts</a>
@@ -369,6 +468,26 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6
 </header>
 <div class="livebar" id="livebar" hidden></div>
 
+<section class="view" id="view-graph">
+  <div class="toolbar graph-tools">
+    <div class="trail" id="graphTrail" aria-label="Where you are in the graph"></div>
+    <input id="graphFind" class="pill" type="search" placeholder="Focus on a person, topic, group or year" list="graphList" autocomplete="off">
+    <datalist id="graphList"></datalist>
+    <div class="chips" id="graphDepth" title="How far out from the focus to draw"></div>
+    <div class="chips" id="graphTypes" title="What to show around the focus"></div>
+    <select id="graphApp" title="Only people with a chat in this app" hidden></select>
+  </div>
+  <div class="graph-body">
+    <div class="graph-stage" id="graphStage">
+      <svg id="graphSvg" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="The archive as a graph around the focus"></svg>
+      <div class="graph-hint" id="graphHint" hidden></div>
+      <div class="graph-legend" id="graphLegend"></div>
+      <div class="graph-zoom"><button class="icon" id="graphZoomOut" title="Zoom out" aria-label="Zoom out">−</button><button class="icon" id="graphZoomIn" title="Zoom in" aria-label="Zoom in">+</button><button class="fit" id="graphFit" title="Fit the graph to the window">Fit</button></div>
+      <div class="graph-note" id="graphNote" hidden></div>
+    </div>
+    <aside class="graph-side" id="graphSide" aria-label="Profile of the focus"></aside>
+  </div>
+</section>
 <section class="view" id="view-chats">
   <aside class="sidebar">
     <div class="side-tools">
@@ -428,6 +547,7 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6
       <div class="chat-head-row">
         <div class="chat-title"><button class="icon" id="personBack" title="Everyone" aria-label="Everyone"><svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button><span id="personAvatar"></span><div style="min-width:0"><h2 id="personName"></h2><div id="personMeta" class="secondary"></div><div id="personIds" class="also"></div></div></div>
         <div class="chat-tools">
+          <button class="tonal" id="personGraph" title="This person in the graph: their topics, connections, groups and years">🕸 Graph</button>
           <button class="tonal" id="personRename" title="Give this person a name of your own">Rename…</button>
           <button class="tonal" id="personJoin" title="Someone else in the list is this person too: join them">Same person as…</button>
         </div>
@@ -557,7 +677,7 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6
 <div id="help" hidden><div class="help-card">
   <h2>Keyboard shortcuts</h2>
   <table>
-    <tr><td><kbd>1</kbd>–<kbd>8</kbd></td><td>Chats, People, Contacts, Search, Media, Review, Analysis, About</td></tr>
+    <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Graph, Chats, People, Contacts, Search, Media, Review, Analysis, About</td></tr>
     <tr><td><kbd>/</kbd></td><td>Search (in a chat: find in this chat)</td></tr>
     <tr><td><kbd>n</kbd> / <kbd>N</kbd></td><td>Next / previous match in the chat</td></tr>
     <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>Next / previous conversation</td></tr>
@@ -579,6 +699,7 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6
 <script src="modules/tiktok.js"></script>
 <script src="modules/imessage.js"></script>
 <script src="modules/signal.js"></script>
+<script src="graph.js"></script>
 <script src="viewer.js"></script>
 </body>
 </html>

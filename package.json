@@ -10,7 +10,7 @@
   },
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node test/restore/import-phone.mjs extension/library.js && node test/importers/run.mjs && node test/people/run.mjs && node test/filters/run.mjs && node test/app/run.mjs",
+    "test": "node test/restore/import-phone.mjs extension/library.js && node test/importers/run.mjs && node test/people/run.mjs && node test/filters/run.mjs && node test/app/run.mjs && node test/graph/run.mjs",
     "package": "node scripts/check.mjs && node scripts/package.mjs",
     "app": "node scripts/build-app.mjs",
     "serve-app": "node scripts/build-app.mjs && node scripts/serve-app.mjs",

@@ -82,6 +82,16 @@ Then in the extension's Settings → *Tools* → **Bring in conversations**, cli
 - **Everything is read on your computer.** No logins to those apps, nothing uploaded. Their chats can't go back on a phone as texts; that's for text messages only.
 - **iMessage and Signal** aren't supported yet: iMessage lives in a database on your Mac, and Signal has no plain export.
 
+## The graph
+
+The viewer opens on the **Graph**: your archive as nodes and links, as Obsidian's graph shows a vault, but never all of it at once. You are at the centre, with the people you write to, what you talk about, your groups and your years around you.
+
+- **Click anything to put it at the centre** and see what links to it: a person's topics, the people they name and who names them, who they're in groups with and their years; a topic's people and groups; a year's people and groups (its topics and events are in its profile); a group's members. **1 step** shows what links to the focus, **2 steps** what links to that too; chips turn people, topics, groups, years and labels on and off; the trail at the top leads back. A focus box finds anyone or anything by name, number or word.
+- **A profile beside it.** For a person, everything the archive knows about them, added up across their chats in every app: the gist (how much you talk, who sends more, how fast you each reply, who starts), each year, when you talk, what they talk about, their connections, the moments and events of your chats (first message, busiest day, longest silence, birthdays, meeting up, travel…), what you've shared, their chats and groups. Every day is a link to it in the chat. A topic's profile says who talks about it and when; a year's, who and what that year was about.
+- **Shift+click** (or the buttons in the profile) opens the thing itself: a person's page, a search for a topic, a group's chat, a year's analysis.
+
+It uses the same analysis as the Obsidian notes, worked out in the viewer as it opens, in your browser; nothing leaves your computer. People you've never written to (codes, alerts, businesses) are left out unless you turn **One-way senders** on.
+
 ## People
 
 The viewer's **People** tab puts each person's chats together, whatever app, account or number they were in.

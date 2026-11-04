@@ -1,6 +1,6 @@
 ---
 tags: [reference, format]
-updated: 2026-10-27
+updated: 2026-11-03
 index_version: 5
 ---
 # Library format (index version 5)
@@ -87,7 +87,7 @@ Built by `buildProgress()` in `backupConversation`: `complete` (history complete
 
 ## chat.js (compact form for the viewer)
 `compactMessages(folder, messages)`, short keys to keep it small:
-`i` index, `d` 1 = sent, `s` sender, `t` timestamp, `x` text, `p` precision (if not `message`), `tr` raw time, `id`, `r` `{ s, x }` reply, `rc` reactions (the labels Google Messages for Web showed), `m[]` media `{ k kind, f path from library root, w, h, src, sha, err, skip, st status }`, `lo[]` left out `{ k, why, w, h }`.
+`i` index, `d` 1 = sent, `s` sender, `t` timestamp, `x` text, `p` precision (if not `message`), `tr` raw time, `id`, `kind` (`call`, `system`: not a plain message; since the Graph view), `sn` (the sender's number, from a phone backup, for a group's senders; the same), `r` `{ s, x }` reply, `rc` reactions (the labels Google Messages for Web showed), `m[]` media `{ k kind, f path from library root, w, h, src, sha, err, skip, st status }`, `lo[]` left out `{ k, why, w, h }`.
 
 ## data.js
 `GMLib.indexScript({ exported_at, updated_at, info, conversations: rows, skipped, verification, version })`. Each row is `GMLib.summarize(entry)`: `id`, `title`, `service` (only when not `sms`), `account` and `account_label` (only for a second account), `folder`, `file` (the `chat.js` path), `participants`, `updated_at`, `range`, `traits` (`{ v, sent, received, codes, promos, links, scams }`, `v` the rules' version, `GMLib.TRAITS_VERSION`: older rows have none, and are counted again where their traits are used; `GMLib.chatTraits`: what tells codes, promotions and automated texts apart, [[Sources]]), `contact` (summary: `people[]` of `{ n, num?, h? (an app handle), photo?, fav? }`), `group` (only `true`, for a group from an import), `count`, `first`, `last`, `media_saved/failed/pending/skipped`, and from 0.4.5.0 `media: { full, same, thumbnail, original, waiting, skipped, failed, left }`, then `status`, `problems`, `checked_at` from the checks, and `imported_at` (`progress.imported.at`: when another app's export last brought it in, for Settings' Apps tab). Read back with `GMLib.parseIndex()`; `GMLib.readLibrary()` migrates older libraries.

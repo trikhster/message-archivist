@@ -1,6 +1,6 @@
 ---
 tags: [reference, storage]
-updated: 2026-10-26
+updated: 2026-11-03
 ---
 # Storage and settings
 
@@ -62,5 +62,6 @@ Permission: `queryPermission({ mode: 'readwrite' })`; Chrome may drop it after a
 
 ## localStorage (viewer)
 - `ma-show-filtered`: `1` when **Show them everywhere** is on (codes, promotions and automated texts in All chats, People, Search, Media and Analysis too).
+- `ma-graph`: the Graph view's choices, `{ depth: 1 | 2, types: ['person', 'topic', …], oneWay: bool }` (how far out to draw, what to show around the focus, whether one-way senders are shown; [[Viewer]] → Graph).
 - `gm-flags:<exported_at>:<chat ids…>`: flags for a viewer **not** opened from the extension (`index.html` from disk). With "Open my backup" flags live in `labels.json` and any here are moved over once.
 - `gm-theme`: the theme choice for each extension page and the viewer (`theme.js`). The source of truth for those pages; `chrome.storage.local.theme` is a copy for the content script.

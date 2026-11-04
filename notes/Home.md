@@ -1,6 +1,6 @@
 ---
 tags: [moc]
-updated: 2026-10-27
+updated: 2026-11-03
 version: 0.5.0.0
 ---
 # Message Archivist: developer notes
@@ -34,6 +34,7 @@ The user-facing docs live outside this vault: the user guide (`extension/README.
 | Notes for Obsidian | `obsidian.js` | [[Obsidian notes]] |
 | The app (installed from GitHub Pages) | `app/`, `scripts/build-app.mjs` | [[App]] |
 | Offline viewer | `viewer.html`, `viewer.js` | [[Viewer]] |
+| The graph model (the Graph view's nodes, links, layout and profiles) | `graph.js` | [[Graph]] |
 | Zip writer, theme, scripts | `zip.js`, `theme.*`, `scripts/` | [[Small files]] |
 | Android app | `android/` | [[Android app]] |
 

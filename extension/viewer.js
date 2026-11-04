@@ -684,6 +684,7 @@
     async function savePeople(next, keepChat) {
       SAVED = next;
       PPL = GMLib.people(PEOPLE_ROWS, SAVED, window.GM_CONTACTS || null);
+      resetGraph();
       pplState.person = keepChat !== undefined ? (keepChat && PPL.byChat.get(keepChat)) || null : pplState.person && personByKey(pplState.person.key);
       renderPeopleList();
       renderPerson();
@@ -725,6 +726,7 @@
     function renderPerson() {
       const p = pplState.person;
       $('#personRename').hidden = $('#personJoin').hidden = !p || pplState.matches || !canLabel;
+      $('#personGraph').hidden = !p || pplState.matches;
       $('#personScroll').scrollTop = 0;
       if (pplState.matches) {
         $('#personAvatar').innerHTML = '';
@@ -806,6 +808,7 @@
     $('#pplSort').addEventListener('change', renderPeopleList);
     $('#pplSuggest').addEventListener('click', () => { location.hash = '#people/~matches'; });
     $('#personBack').addEventListener('click', () => { location.hash = '#people'; });
+    $('#personGraph').addEventListener('click', () => { const p = pplState.person; if (p) location.hash = `#graph/person/${encodeURIComponent(p.key)}`; });
     $('#personRename').addEventListener('click', () => {
       const p = pplState.person;
       const name = p && prompt(`A name for ${p.name} (leave it empty to go back to the name their chats give):`, p.named ? p.name : '');
@@ -872,7 +875,7 @@
       const maybe = maybeElsewhere(c);
       const chip = (o, list, maybeOne) => `<button class="chip${maybeOne ? ' maybe' : ''}" data-goto="${o.ci}" title="${esc(o.title)}${maybeOne ? ': the same name, not joined yet' : ''}">${esc(srcName(o))}${list.filter((x) => srcKey(x) === srcKey(o)).length > 1 || srcKey(o) === srcKey(c) ? `: ${esc(o.title)}` : ''}${maybeOne ? '?' : ''}</button>`;
       const kind = c.kind ? `<div class="also">${KINDS[c.kind].icon} ${esc(KINDS[c.kind].long)}${SHOW_ALL ? '' : ': kept out of All chats, People, Search, Media and Analysis'}${canLabel ? ' <button class="chip" data-notkind title="Keep it with your other chats from now on">It’s not</button>' : ''}</div>` : '';
-      return chatLabels(c).map(labelChip).join('') + kind + (who ? `<div class="also"><a class="person-link" href="#people/${encodeURIComponent(who.key)}" title="Every chat with ${esc(who.name)}, in every app">👤 ${esc(who.name)}</a>${also.length ? ` · also in ${also.map((o) => chip(o, also)).join(' ')}` : ''}${maybe.length ? ` · maybe ${maybe.map((o) => chip(o, maybe, true)).join(' ')}` : ''}</div>` : '');
+      return chatLabels(c).map(labelChip).join('') + kind + (who ? `<div class="also"><a class="person-link" href="#people/${encodeURIComponent(who.key)}" title="Every chat with ${esc(who.name)}, in every app">👤 ${esc(who.name)}</a> <a class="chip" href="#graph/person/${encodeURIComponent(who.key)}" title="${esc(who.name)} in the graph: their topics, connections, groups and years">🕸 Graph</a>${also.length ? ` · also in ${also.map((o) => chip(o, also)).join(' ')}` : ''}${maybe.length ? ` · maybe ${maybe.map((o) => chip(o, maybe, true)).join(' ')}` : ''}</div>` : '');
     }
 
     // ---------- chat view ----------
@@ -2038,13 +2041,582 @@
       if (state.conv) renderChat();
     }
 
+    // ---------- graph ----------
+    // The archive as nodes and links, as Obsidian's graph shows a vault, but
+    // never the whole archive at once: an ego graph around one focus (you, a
+    // person, a topic, a group chat, a year or a contact label) a step or two
+    // out, laid out the same way every time (GMGraph: rings and sectors, no
+    // physics, so the same question always looks the same), with the focus's
+    // profile beside it: everything the archive knows about them, added up
+    // across their chats. What each chat says (GMLib.analyse, the same
+    // analysis the Obsidian notes use) is worked out once per opening, a few
+    // chats at a time so the page stays responsive, and kept in memory.
+    const ANALYSIS = new Map(); // chat -> what it says
+    let GRAPH = null;
+    let graphBuilding = null;
+    const GTYPES = GMGraph.TYPES.filter((t) => t !== 'you');
+    const GTYPE = {
+      you: { name: 'You', one: 'you', color: 'var(--c1)' },
+      person: { name: 'People', one: 'person', color: 'var(--c2)' },
+      topic: { name: 'Topics', one: 'topic', color: 'var(--c7)' },
+      group: { name: 'Groups', one: 'group chat', color: 'var(--c4)' },
+      year: { name: 'Years', one: 'year', color: 'var(--year)' },
+      label: { name: 'Labels', one: 'contact label', color: 'var(--c5)' },
+    };
+    const graphState = { trail: ['you'], focus: 'you', depth: 1, types: new Set(GTYPES), oneWay: false, app: '' };
+    // How far out to draw and what to show are remembered in this browser.
+    try {
+      const s = JSON.parse(localStorage.getItem('ma-graph') || '{}');
+      if (s.depth === 2) graphState.depth = 2;
+      if (Array.isArray(s.types)) graphState.types = new Set(s.types.filter((t) => GTYPES.includes(t)));
+      if (s.oneWay) graphState.oneWay = true;
+    } catch { /* storage blocked */ }
+    const saveGraphState = () => { try { localStorage.setItem('ma-graph', JSON.stringify({ depth: graphState.depth, types: [...graphState.types], oneWay: graphState.oneWay })); } catch { /* storage blocked */ } };
+    const many = (n, one, more = `${one}s`) => `${nf(n)} ${n === 1 ? one : more}`;
+    const graphNote = (html) => { const el = $('#graphNote'); el.hidden = !html; el.innerHTML = html || ''; };
+
+    async function ensureGraph() {
+      if (GRAPH) return GRAPH;
+      if (!graphBuilding) {
+        graphBuilding = (async () => {
+          const total = PEOPLE_ROWS.reduce((n, c) => n + c.messages.length, 0) || 1;
+          let done = 0;
+          let since = 0;
+          for (const c of PEOPLE_ROWS) {
+            // Reactions folded onto their message aren't messages of their own here either.
+            if (!ANALYSIS.has(c)) ANALYSIS.set(c, GMLib.analyse(c.messages.filter((m) => !m.rxOf), null));
+            done += c.messages.length;
+            since += c.messages.length;
+            // Hand the page back now and then, so a big archive doesn't freeze it.
+            if (since >= 12000) { since = 0; graphNote(`<p>Reading what your chats are about… ${Math.round((done / total) * 100)}%</p>`); await new Promise((r) => setTimeout(r, 0)); }
+          }
+          GRAPH = GMGraph.build({ rows: PEOPLE_ROWS, P: PPL, cache: ANALYSIS, book: window.GM_CONTACTS || null });
+          graphBuilding = null;
+          return GRAPH;
+        })();
+      }
+      return graphBuilding;
+    }
+    // People changed (joined, split, renamed): the graph is built again from the same analyses.
+    const resetGraph = () => { GRAPH = null; graphBuilding = null; profileFor = null; };
+
+    const graphHash = (n) => (n.type === 'you' ? '#graph' : `#graph/${n.type}/${encodeURIComponent(n.key)}`);
+    const graphNodeOf = (type, key) => (!type || type === 'you' ? GRAPH.nodes.get('you') : GRAPH.nodes.get(`${type}:${key}`) || null);
+    const gShort = (s, n = 20) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+    const r1 = (v) => Math.round(v * 10) / 10;
+
+    // #graph/<type>/<key>: the focus. The trail (breadcrumbs) is the path
+    // taken to it; going back to a node already on it cuts the trail there.
+    async function showGraph(type, key) {
+      if (!GRAPH) graphNote('<p>Reading what your chats are about…</p>');
+      const G = await ensureGraph();
+      if (location.hash && !location.hash.startsWith('#graph')) return; // moved on while the chats were read
+      fillGraphList();
+      const node = graphNodeOf(type, key) || G.nodes.get('you');
+      graphState.focus = node.id;
+      const i = graphState.trail.indexOf(node.id);
+      graphState.trail = i >= 0 ? graphState.trail.slice(0, i + 1) : [...graphState.trail, node.id];
+      graphNote('');
+      renderGraph();
+    }
+
+    const zoom = { k: 1, x: 0, y: 0 };
+    const gsvg = $('#graphSvg');
+    const applyZoom = () => { const g = document.getElementById('gZoom'); if (g) g.setAttribute('transform', `translate(${r1(zoom.x)} ${r1(zoom.y)}) scale(${r1(zoom.k * 100) / 100})`); };
+    let graphDrawn = ''; // the size the graph was last drawn at, so a resize to the same size doesn't redraw
+    let profileFor = null; // whose profile the side pane shows
+    function renderGraph() {
+      const G = GRAPH;
+      if (!G) return;
+      const focus = G.nodes.get(graphState.focus) || G.nodes.get('you');
+      const opts = { depth: graphState.depth, types: graphState.types, oneWay: graphState.oneWay, services: graphState.app ? new Set([graphState.app]) : null };
+      const ego = GMGraph.ego(G, focus.id, opts);
+      // The trail, the tools and the profile first: they can change the stage's size, measured next.
+      // The profile depends on the focus alone, so a chip or a resize leaves it (and its scroll) as it is.
+      renderTrail();
+      renderGraphTools();
+      if (profileFor !== focus.id) {
+        const side = $('#graphSide');
+        const pr = GMGraph.profile(G, focus.id);
+        side.innerHTML = pr ? profileHtml(pr) : '';
+        side.scrollTop = 0;
+        profileFor = focus.id;
+      }
+      const box = $('#graphStage').getBoundingClientRect();
+      const W = Math.max(360, Math.round(box.width || 900));
+      const H = Math.max(320, Math.round(box.height || 600));
+      graphDrawn = `${W}x${H}`;
+      // The bottom strip is the legend's and the zoom buttons': nothing is laid out there.
+      const lay = GMGraph.layout(ego, { width: W, height: H - 44 });
+      gsvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      gsvg.innerHTML = graphSvg(lay, ego);
+      zoom.k = 1; zoom.x = 0; zoom.y = 0;
+      applyZoom();
+      renderLegend(ego);
+      const alone = ego.nodes.length <= 1;
+      $('#graphHint').hidden = !alone;
+      $('#graphHint').textContent = alone ? 'Nothing links to this with what’s shown. Turn more types on above, or show one-way senders.' : '';
+      graphNote(G.byType.person.length || G.byType.group.length ? '' : '<p><b>Nothing to map yet.</b> The graph is built from your one-to-one chats and groups: back up a chat from Google Messages, bring in a phone backup, or bring in another app’s export, and the people, topics and years in them appear here.</p>');
+    }
+
+    // The picture: links first (under the nodes), then every node with its
+    // shape by type: people as their photo or initial, topics as pills with
+    // the word in them, groups as rounded squares in their app's colour,
+    // years as squares, labels as tags. Lines stop at the nodes' edges, so an
+    // arrowhead (who names whom) lands on the circle rather than under it.
+    function graphSvg(lay, ego) {
+      const byId = new Map(ego.nodes.map((n) => [n.id, n]));
+      const at = new Map(lay.nodes.map((n) => [n.id, n]));
+      const defs = '<defs><marker id="garrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z"/></marker></defs>';
+      const edges = lay.edges.map((e) => {
+        const A = at.get(e.a);
+        const B = at.get(e.b);
+        if (!A || !B) return '';
+        const dx = e.x2 - e.x1;
+        const dy = e.y2 - e.y1;
+        const len = Math.hypot(dx, dy) || 1;
+        if (len <= A.r + B.r + 8) return '';
+        const ux = dx / len;
+        const uy = dy / len;
+        const trim = e.dir ? 7 : 2;
+        return `<line class="gedge ${esc(e.kind)}" data-a="${esc(e.a)}" data-b="${esc(e.b)}" x1="${r1(e.x1 + ux * (A.r + 2))}" y1="${r1(e.y1 + uy * (A.r + 2))}" x2="${r1(e.x2 - ux * (B.r + trim))}" y2="${r1(e.y2 - uy * (B.r + trim))}" stroke-width="${r1(e.sw)}"${e.dir ? ' marker-end="url(#garrow)"' : ''}></line>`;
+      }).join('');
+      const nodes = lay.nodes.map((ln, k) => nodeSvg(byId.get(ln.id), ln, k, ln.id === ego.focus.id)).join('');
+      return `${defs}<g id="gZoom">${edges}${nodes}</g>`;
+    }
+    function nodeSvg(n, ln, k, focus) {
+      if (!n) return '';
+      const { x, y, r } = ln;
+      const X = r1(x);
+      const Y = r1(y);
+      let body = '';
+      let label = '';
+      const below = (text) => `<text class="lbl" x="${X}" y="${r1(y + r + 13)}" text-anchor="middle">${esc(gShort(text, 22))}</text>`;
+      if (n.type === 'person' || n.type === 'you') {
+        const name = n.type === 'you' ? 'Me' : n.label;
+        const color = n.type === 'you' ? 'var(--c1)' : personColor(n.label);
+        body = PHOTOS.has(name)
+          ? `<clipPath id="gclip${k}"><circle cx="${X}" cy="${Y}" r="${r}"></circle></clipPath><circle class="shape" cx="${X}" cy="${Y}" r="${r}" fill="var(--surface-2)"></circle><image href="${esc(PHOTOS.get(name))}" x="${r1(x - r)}" y="${r1(y - r)}" width="${2 * r}" height="${2 * r}" preserveAspectRatio="xMidYMid slice" clip-path="url(#gclip${k})"></image>`
+          : `<circle class="shape" cx="${X}" cy="${Y}" r="${r}" fill="${color}"></circle><text class="ini" x="${X}" y="${Y}" dy=".35em" text-anchor="middle" style="font-size:${r1(r * 0.95)}px">${esc(initial(name))}</text>`;
+        label = below(n.type === 'you' ? 'You' : n.label);
+      } else if (n.type === 'topic') {
+        const text = gShort(n.label, 24);
+        const w = Math.max(2 * r, text.length * 6.6 + 18);
+        const h = Math.min(2 * r, 26);
+        body = `<rect class="shape" x="${r1(x - w / 2)}" y="${r1(y - h / 2)}" width="${r1(w)}" height="${r1(h)}" rx="${r1(h / 2)}" fill="var(--surface-2)" stroke="${n.people >= 2 ? 'var(--c7)' : 'var(--outline-variant)'}" stroke-width="1.5"></rect><text class="pill" x="${X}" y="${Y}" dy=".35em" text-anchor="middle">${esc(text)}</text>`;
+      } else if (n.type === 'group') {
+        body = `<rect class="shape" x="${r1(x - r)}" y="${r1(y - r)}" width="${2 * r}" height="${2 * r}" rx="${r1(r * 0.4)}" fill="${appColor(n.service)}"></rect><text class="ini" x="${X}" y="${Y}" dy=".35em" text-anchor="middle" style="font-size:${r1(r)}px">👥</text>`;
+        label = below(n.label);
+      } else if (n.type === 'year') {
+        body = `<rect class="shape" x="${r1(x - r)}" y="${r1(y - r)}" width="${2 * r}" height="${2 * r}" rx="6" fill="var(--year)"></rect><text class="ini" x="${X}" y="${Y}" dy=".35em" text-anchor="middle" style="font-size:${r1(Math.max(10, r * 0.62))}px">${esc(n.label)}</text>`;
+      } else {
+        body = `<circle class="shape" cx="${X}" cy="${Y}" r="${r}" fill="var(--c5)"></circle><text class="ini" x="${X}" y="${Y}" dy=".35em" text-anchor="middle" style="font-size:${r1(r * 0.9)}px">🏷</text>`;
+        label = below(n.label);
+      }
+      const halo = focus ? `<circle class="halo" cx="${X}" cy="${Y}" r="${r1(r + 5)}"></circle>` : '';
+      return `<g class="gnode t-${n.type}${focus ? ' focus' : ''}" data-id="${esc(n.id)}" data-tip="${esc(graphTip(n))}" tabindex="0" role="button" aria-label="${esc(n.type === 'you' ? 'You' : `${n.label}, ${GTYPE[n.type].one}`)}"${focus ? ' aria-current="true"' : ''}>${halo}${body}${label}</g>`;
+    }
+    // `actions`: the stage's nodes, where Shift+click opens; a profile row is a plain link.
+    function graphTip(n, actions = true) {
+      const how = actions && n.type !== 'you' ? '\nClick to put it at the centre · Shift+click to open it' : '';
+      if (n.type === 'you') return `You\n${many(n.w, 'message')} with the people you’ve written to`;
+      if (n.type === 'person') return `${n.label}\n${many(n.w, 'message')}${n.sub && n.sub !== n.label ? `\n${n.sub}` : ''}${n.oneWay ? '\nOne-way: you’ve never written to them' : ''}${how}`;
+      if (n.type === 'topic') return `“${n.label}”\nUsed ${many(n.w, 'time')} by ${many(n.people, 'person or group', 'people or groups')}${how}`;
+      if (n.type === 'group') return `${n.label}\n${appName(n.service)} · ${many(n.w, 'message')}${how}`;
+      if (n.type === 'year') return `${n.label}\n${many(n.w, 'message')}${how}`;
+      return `${n.label}\nA label in your phone’s contacts: ${many(n.w, 'person', 'people')}${how}`;
+    }
+    // Shift+click, or the actions in the profile: the thing itself, not its place in the graph.
+    function openNode(n) {
+      if (n.type === 'person') location.hash = `#people/${encodeURIComponent(n.key)}`;
+      else if (n.type === 'topic') drill({ q: n.key, sort: 'new' });
+      else if (n.type === 'group') location.hash = `#chat/${n.ref.ci}`;
+      else if (n.type === 'year') statsFor(`${n.key}-01-01`, `${n.key}-12-31`);
+      else if (n.type === 'label') location.hash = '#contacts';
+      else location.hash = '#about';
+    }
+    // Analysis of everything over a period.
+    function statsFor(from, to) {
+      $('#statsPeriod').value = 'custom';
+      $('#stFrom').value = from;
+      $('#stTo').value = to;
+      $('#statsPerson').value = '';
+      if (location.hash === '#stats/all') renderStats(); else location.hash = '#stats/all';
+    }
+    // The gallery, one chat's.
+    function mediaFor(ci) {
+      $('#mConv').value = String(ci);
+      fillPeople($('#mSender'), String(ci));
+      renderMedia();
+      mediaRendered = true;
+      location.hash = '#media';
+    }
+
+    function renderTrail() {
+      $('#graphTrail').innerHTML = graphState.trail.map((id, i) => {
+        const n = GRAPH.nodes.get(id);
+        if (!n) return '';
+        const cur = i === graphState.trail.length - 1;
+        return `${i ? '<span class="sep">›</span>' : ''}<button class="crumb${cur ? ' cur' : ''}"${cur ? ' aria-current="page" tabindex="-1"' : ''} data-id="${esc(id)}" title="${esc(cur ? 'Where you are' : `Back to ${n.type === 'you' ? 'you' : n.label}`)}">${esc(gShort(n.type === 'you' ? 'You' : n.label, 24))}</button>`;
+      }).join('');
+    }
+    function renderGraphTools() {
+      $('#graphDepth').innerHTML = [1, 2].map((d) => `<button class="chip${graphState.depth === d ? ' on' : ''}" data-depth="${d}" aria-pressed="${graphState.depth === d}" title="${d === 1 ? 'What links to the focus' : 'What links to that, too'}">${d === 1 ? '1 step' : '2 steps'}</button>`).join('');
+      $('#graphTypes').innerHTML = GTYPES.map((t) => `<button class="chip${graphState.types.has(t) ? ' on' : ''}" data-type="${t}" aria-pressed="${graphState.types.has(t)}">${GTYPE[t].name}</button>`).join('') +
+        `<button class="chip${graphState.oneWay ? ' on' : ''}" data-oneway aria-pressed="${graphState.oneWay}" title="People you’ve never written to: codes, alerts, businesses and spam">One-way senders</button>`;
+    }
+    function renderLegend(ego) {
+      const types = new Set(ego.nodes.map((n) => n.type));
+      const items = [];
+      if (types.has('person') || types.has('you')) items.push('<span><i style="background:var(--c2)"></i>people</span>');
+      if (types.has('topic')) items.push('<span><i class="pill"></i>topics</span>');
+      if (types.has('group')) items.push('<span><i class="sq" style="background:var(--c4)"></i>groups</span>');
+      if (types.has('year')) items.push('<span><i class="sq" style="background:var(--year)"></i>years</span>');
+      if (types.has('label')) items.push('<span><i style="background:var(--c5)"></i>labels</span>');
+      const kinds = new Set(ego.edges.map((e) => e.kind));
+      if (kinds.has('named')) items.push('<span><i style="width:16px;height:0;border-top:2px dashed var(--c2);border-radius:0"></i>names them</span>');
+      if (kinds.has('together')) items.push('<span><i style="width:16px;height:2px;background:var(--c6);border-radius:0"></i>in groups together</span>');
+      const hidden = Object.entries(ego.hidden || {}).filter(([, n]) => n > 0).map(([t, n]) => `${nf(n)} more ${n === 1 ? GTYPE[t]?.one || t : (GTYPE[t]?.name || t).toLowerCase()}`);
+      if (hidden.length) items.push(`<span><b>Not shown:</b> ${hidden.join(', ')}</span>`);
+      $('#graphLegend').innerHTML = items.join('');
+    }
+    // The focus box offers everyone and everything that can be a focus.
+    let graphListFor = null;
+    function fillGraphList() {
+      if (graphListFor === GRAPH) return;
+      graphListFor = GRAPH;
+      const opts = [];
+      for (const t of GTYPES) {
+        for (const id of GRAPH.byType[t] || []) {
+          const n = GRAPH.nodes.get(id);
+          if (!n || (n.type === 'person' && n.oneWay)) continue;
+          opts.push(`<option value="${esc(n.label)}">${esc(GTYPE[t].one)}</option>`);
+        }
+      }
+      $('#graphList').innerHTML = opts.join('');
+      const apps = [...new Set(PEOPLE_ROWS.map(appOf))];
+      $('#graphApp').hidden = apps.length < 2;
+      $('#graphApp').innerHTML = `<option value="">All apps</option>${apps.map((a) => `<option value="${esc(a)}"${graphState.app === a ? ' selected' : ''}>${esc(appName(a))}</option>`).join('')}`;
+    }
+    $('#graphFind').addEventListener('change', () => {
+      const v = $('#graphFind').value.trim();
+      if (!v || !GRAPH) return;
+      const [n] = GMGraph.search(GRAPH, v, 1);
+      if (!n) { $('#graphHint').hidden = false; $('#graphHint').textContent = `Nothing called “${v}” in the graph.`; return; }
+      $('#graphFind').value = '';
+      location.hash = graphHash(n);
+    });
+    $('#graphFind').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#graphFind').dispatchEvent(new Event('change')); } });
+    $('#graphTrail').addEventListener('click', (e) => { const b = e.target.closest('[data-id]'); const n = b && GRAPH?.nodes.get(b.dataset.id); if (n) location.hash = graphHash(n); });
+    $('#graphDepth').addEventListener('click', (e) => { const b = e.target.closest('[data-depth]'); if (!b) return; graphState.depth = +b.dataset.depth; saveGraphState(); renderGraph(); });
+    $('#graphTypes').addEventListener('click', (e) => {
+      const t = e.target.closest('[data-type]');
+      if (t) { if (graphState.types.has(t.dataset.type)) graphState.types.delete(t.dataset.type); else graphState.types.add(t.dataset.type); }
+      else if (e.target.closest('[data-oneway]')) graphState.oneWay = !graphState.oneWay;
+      else return;
+      saveGraphState();
+      renderGraph();
+    });
+    $('#graphApp').addEventListener('change', () => { graphState.app = $('#graphApp').value; renderGraph(); });
+
+    // Pan by dragging the background, zoom with the wheel (about the pointer) or the buttons.
+    let gdrag = null;
+    let gdragged = false;
+    const svgScale = () => { const r = gsvg.getBoundingClientRect(); const vb = gsvg.viewBox.baseVal; return { sx: r.width ? vb.width / r.width : 1, sy: r.height ? vb.height / r.height : 1, r, vb }; };
+    const zoomTo = (k, px, py) => {
+      k = Math.min(4, Math.max(0.35, k));
+      zoom.x = px - ((px - zoom.x) * k) / zoom.k;
+      zoom.y = py - ((py - zoom.y) * k) / zoom.k;
+      zoom.k = k;
+      applyZoom();
+    };
+    gsvg.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const { sx, sy, r } = svgScale();
+      zoomTo(zoom.k * (e.deltaY < 0 ? 1.15 : 1 / 1.15), (e.clientX - r.left) * sx, (e.clientY - r.top) * sy);
+    }, { passive: false });
+    // A press on a node is a click unless the pointer moves; only a real drag
+    // takes pointer capture (capturing on the press would retarget the
+    // browser's click to the SVG itself and the node would never be seen).
+    gsvg.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; gdrag = { x: e.clientX, y: e.clientY, zx: zoom.x, zy: zoom.y, node: e.target.closest('.gnode') }; gdragged = false; });
+    gsvg.addEventListener('pointermove', (e) => {
+      if (!gdrag) return;
+      const dx = e.clientX - gdrag.x;
+      const dy = e.clientY - gdrag.y;
+      if (!gdragged && Math.hypot(dx, dy) < 4) return;
+      if (!gdragged) { gdragged = true; gsvg.classList.add('dragging'); try { gsvg.setPointerCapture(e.pointerId); } catch { /* the pointer is gone already */ } }
+      const { sx, sy } = svgScale();
+      zoom.x = gdrag.zx + dx * sx;
+      zoom.y = gdrag.zy + dy * sy;
+      applyZoom();
+    });
+    const endDrag = () => { gdrag = null; gsvg.classList.remove('dragging'); };
+    gsvg.addEventListener('pointerup', (e) => {
+      const d = gdrag;
+      const dragged = gdragged;
+      endDrag();
+      const n = d && !dragged && d.node && GRAPH?.nodes.get(d.node.dataset.id);
+      if (!n) return;
+      if (e.shiftKey) openNode(n); else location.hash = graphHash(n);
+    });
+    gsvg.addEventListener('pointercancel', endDrag);
+    // Released elsewhere before a drag began: no pan follows the pointer afterwards.
+    gsvg.addEventListener('pointerleave', () => { if (gdrag && !gdragged) endDrag(); });
+    gsvg.addEventListener('focusin', (e) => { const g = e.target.closest?.('.gnode'); if (g) litUp(g.dataset.id); });
+    gsvg.addEventListener('focusout', () => litUp(null));
+    gsvg.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const g = e.target.closest?.('.gnode');
+      const n = g && GRAPH?.nodes.get(g.dataset.id);
+      if (!n) return;
+      e.preventDefault();
+      if (e.shiftKey) openNode(n); else location.hash = graphHash(n);
+    });
+    // Pointing at a node lights up what it's linked to and fades the rest.
+    function litUp(id) {
+      gsvg.querySelectorAll('.lit').forEach((x) => x.classList.remove('lit'));
+      gsvg.classList.toggle('lit', !!id);
+      if (!id) return;
+      const near = new Set([id]);
+      for (const l of gsvg.querySelectorAll('.gedge')) if (l.dataset.a === id || l.dataset.b === id) { l.classList.add('lit'); near.add(l.dataset.a); near.add(l.dataset.b); }
+      for (const g of gsvg.querySelectorAll('.gnode')) if (near.has(g.dataset.id)) g.classList.add('lit');
+    }
+    gsvg.addEventListener('mouseover', (e) => { const g = e.target.closest('.gnode'); if (g) litUp(g.dataset.id); });
+    gsvg.addEventListener('mouseout', (e) => { const g = e.target.closest('.gnode'); if (g && !e.relatedTarget?.closest?.('.gnode')) litUp(null); });
+    $('#graphZoomIn').onclick = () => { const { vb } = svgScale(); zoomTo(zoom.k * 1.25, vb.width / 2, vb.height / 2); };
+    $('#graphZoomOut').onclick = () => { const { vb } = svgScale(); zoomTo(zoom.k / 1.25, vb.width / 2, vb.height / 2); };
+    $('#graphFit').onclick = () => { zoom.k = 1; zoom.x = 0; zoom.y = 0; applyZoom(); };
+    // The window changed size: the same graph, laid out for the new size.
+    new ResizeObserver(debounce(() => {
+      if (!GRAPH || !$('#view-graph').classList.contains('active')) return;
+      const box = $('#graphStage').getBoundingClientRect();
+      if (`${Math.max(360, Math.round(box.width))}x${Math.max(320, Math.round(box.height))}` !== graphDrawn) renderGraph();
+    }, 150)).observe($('#graphStage'));
+
+    // ---------- profiles ----------
+    // The focus's profile, beside the graph: what the Obsidian notes say
+    // about a person (the gist, the years, when you talk, topics,
+    // connections, moments, events, what you've shared), drawn rather than
+    // written, and the same for a topic, a group, a year, a label and you.
+    // Every day is a link to that day in the chat; every person, topic and
+    // group a link to them in the graph.
+    const pfSec = (title, body, sub = '') => `<div class="pf-sec"><h3>${title}${sub ? ` <span class="sub">${sub}</span>` : ''}</h3>${body}</div>`;
+    const pfAvatar = (n) => (n.type === 'person' ? avatar(n.label, personColor(n.label), 'lg') : n.type === 'you' ? avatar('Me', 'var(--c1)', 'lg')
+      : `<span class="shape-lg" style="background:${n.type === 'group' ? appColor(n.service) : GTYPE[n.type].color}">${n.type === 'group' ? '👥' : n.type === 'year' ? '📅' : n.type === 'label' ? '🏷' : '#'}</span>`);
+    const pfHead = (n, name, sub, extra = '') => `<div class="pf-head">${pfAvatar(n)}<div class="pf-title"><div class="pf-name">${name}</div><div class="pf-sub">${sub}</div></div></div>${extra}`;
+    // That day in a chat: its first message that day, or the chat itself.
+    const dayIn = (row, d) => { const m = row?.messages?.find((x) => x.t && x.t.startsWith(d)); return m ? `#chat/${row.ci}/${m.i}` : row ? `#chat/${row.ci}` : '#chat'; };
+    const dayLinkHtml = (row, d, text) => `<a href="${dayIn(row, d)}" title="${esc(row ? `That day in ${row.title}` : 'That day')}">${esc(text || (d ? fmtDate(parseTs(d)) : '?'))}</a>`;
+    const pfRow = ({ href, left, name, why = '', n = null, pct = null, tip = '' }) => `<a class="pf-row" href="${href}"${tip ? ` data-tip="${esc(tip)}"` : ''}>${left}<span class="r-body"><span class="nm">${name}</span>${why ? `<span class="why">${why}</span>` : ''}${pct != null ? `<span class="pf-bar"><i style="width:${Math.max(2, Math.min(100, pct))}%"></i></span>` : ''}</span>${n != null ? `<span class="n">${n}</span>` : ''}</a>`;
+    const nodeRow = (n, o = {}) => pfRow({
+      href: o.href || graphHash(n),
+      left: n.type === 'person' || n.type === 'you' ? avatar(n.type === 'you' ? 'Me' : n.label, n.type === 'you' ? 'var(--c1)' : personColor(n.label), 'sm')
+        : n.type === 'group' ? `<span class="sq" style="background:${appColor(n.service)}">👥</span>`
+        : n.type === 'year' ? `<span class="sq" style="background:var(--year);font-size:10px">${esc(n.label)}</span>`
+        : `<span class="sq" style="background:${GTYPE[n.type].color}">${n.type === 'label' ? '🏷' : '#'}</span>`,
+      name: esc(n.type === 'you' ? 'You' : n.label), why: o.why || '', n: o.n ?? null, pct: o.pct ?? null, tip: graphTip(n, false),
+    });
+    // A topic as a chip: a shared one leads to it in the graph, one person's own to a search for it.
+    const topicChip = (w, n, node) => (node ? `<a class="chip shared" href="${graphHash(node)}" title="Shared with others: see who in the graph">${esc(w)}${n ? ` <span class="n">${nf(n)}</span>` : ''}</a>` : `<button class="chip" data-q="${esc(w)}" title="Search for it">${esc(w)}${n ? ` <span class="n">${nf(n)}</span>` : ''}</button>`);
+    const spark = (vals, tipOf) => { const max = Math.max(1, ...vals); return `<div class="spark">${vals.map((v, i) => `<i style="height:${Math.round((v / max) * 100)}%" role="img" aria-label="${esc(tipOf(i))}" data-tip="${esc(tipOf(i))}"></i>`).join('')}</div>`; };
+    const yearsChart = (years, them = 'Them') => {
+      const max = Math.max(1, ...years.map((y) => y.sent + y.recv));
+      return `<div class="years">${years.map((y) => `<div class="yr" role="img" aria-label="${esc(`${y.y}: ${many(y.sent + y.recv, 'message')}, ${nf(y.sent)} from you`)}" data-tip="${esc(`${y.y}: ${many(y.sent + y.recv, 'message')}\nYou ${nf(y.sent)} · ${them} ${nf(y.recv)}${y.topics?.length ? `\nTalked about ${y.topics.map((t) => t.w).join(', ')}` : ''}`)}"><i class="r" style="height:${Math.round((y.recv / max) * 100)}%"></i><i class="s" style="height:${Math.round((y.sent / max) * 100)}%"></i></div>`).join('')}</div>
+        <div class="years-lab">${years.map((y) => `<span>${years.length > 8 ? String(y.y).slice(2) : y.y}</span>`).join('')}</div>`;
+    };
+    const lasted = (n) => {
+      if (n < 45) return many(n, 'day');
+      const mo = Math.round(n / 30.44);
+      if (mo < 12) return `${mo} months`;
+      const y = Math.floor(mo / 12);
+      const r = mo % 12;
+      return `${y} year${y > 1 ? 's' : ''}${r ? ` and ${r} month${r > 1 ? 's' : ''}` : ''}`;
+    };
+    const mediaText = (k = {}) => [[k.p, 'photo'], [k.v, 'video'], [k.a, 'voice note'], [k.f, 'file']].filter(([n]) => n).map(([n, one]) => many(n, one)).join(', ');
+    const EVENT_EMOJI = { bday: '🎂', anniv: '💍', congrats: '🎉', holiday: '🎊', trip: '✈️', meet: '🤝', photos: '📷' };
+    // An event in words, as the notes put it, with the person a link into the graph.
+    function eventText(e, them = null) {
+      const W = e.person ? (them && e.person.id === them.id ? 'them' : `<a href="${graphHash(e.person)}">${esc(e.person.label)}</a>`) : null;
+      const G = e.row ? `<a href="#chat/${e.row.ci}">${esc(e.row.title)}</a>` : 'a chat';
+      switch (e.kind) {
+        case 'bday': return W ? `${e.me ? `You wished ${W} happy birthday` : `${W === 'them' ? 'They' : W} wished you happy birthday`}${e.hint === 'belated' ? ' (belated)' : ''}` : `Birthday wishes${e.hint && e.hint !== 'belated' ? ` for ${esc(e.hint)}` : ''} in ${G}`;
+        case 'anniv': return W ? `Happy anniversary with ${W}` : `Anniversary wishes in ${G}`;
+        case 'congrats': return `${W ? (e.me ? `You congratulated ${W}` : `${W === 'them' ? 'They' : W} congratulated you`) : `Congratulations in ${G}`}${e.hint ? ` (${esc(e.hint)}?)` : ''}`;
+        case 'holiday': return `${esc(e.hint)} wishes ${W ? `with ${W}` : `in ${G}`}`;
+        case 'trip': return `Travel talk ${W ? `with ${W}` : `in ${G}`}${e.hint ? ` · ${esc(e.hint)}` : ''}`;
+        case 'meet': return `Probably met up ${W ? `with ${W}` : `with ${G}`}`;
+        case 'photos': return `${many(e.n || 0, 'photo or video', 'photos and videos')} ${W ? `with ${W}` : `in ${G}`}`;
+        default: return '';
+      }
+    }
+    const eventLine = (e, them) => `<li>${dayLinkHtml(e.row, e.d)} · ${EVENT_EMOJI[e.kind] || ''} ${eventText(e, them)}</li>`;
+
+    function profileHtml(pr) {
+      if (pr.type === 'person') return personProfile(pr);
+      if (pr.type === 'topic') return topicProfile(pr);
+      if (pr.type === 'group') return groupProfile(pr);
+      if (pr.type === 'year') return yearProfile(pr);
+      if (pr.type === 'label') return labelProfile(pr);
+      return youProfile(pr);
+    }
+    function personProfile(pr) {
+      const { node: n, p, totals: t, contact: k } = pr;
+      const card = k?.card || {};
+      const bday = k?.birthday;
+      const who = [k?.starred && '⭐ Starred', card.nickname && `“${esc(card.nickname)}”`,
+        (card.job_title || card.organization) && [card.job_title, card.organization].filter(Boolean).map(esc).join(' at '),
+        bday && `Birthday ${esc(bday.text)}`,
+        pr.labels?.length && pr.labels.map((l) => `<a href="#graph/label/${encodeURIComponent(l)}">${esc(l)}</a>`).join(', ')].filter(Boolean);
+      const busiest = [...p.chats].sort((a, b) => b.messages.length - a.messages.length)[0];
+      const acts = [`<a class="button tonal small" href="#people/${encodeURIComponent(p.key)}" title="Their chats, groups and every message with them">Their page</a>`,
+        p.chats.length > 1 ? `<a class="button tonal small" href="#chat/${busiest.ci}/all" title="Every chat with them, in every app, as one conversation">⇄ All apps</a>` : busiest ? `<a class="button tonal small" href="#chat/${busiest.ci}">Open chat</a>` : '',
+        busiest ? `<a class="button small" href="#stats/${busiest.ci}" title="Analysis of ${esc(busiest.title)}">Analyze</a>` : ''].join('');
+      // A person's first and last are the chats' (a moment in ms here; a minute string in Node).
+      const when = (v) => (typeof v === 'number' ? v : parseTs(v));
+      const gist = [`<b>${many(t.total, 'message')}</b>${p.first ? `, ${fmtDate(when(p.first))} to ${fmtDate(when(p.last))}` : ''}.`];
+      if (pr.oneWay) gist.push('You’ve never written to them: most likely codes, alerts, a business or spam.');
+      else if (t.total) gist.push(`You sent ${t.share}% of them.`);
+      if (t.replyMine || t.replyTheirs) gist.push(`${[t.replyMine && `You usually reply ${t.replyMine}`, t.replyTheirs && `${t.replyMine ? 'they' : 'They usually'} reply ${t.replyTheirs}`].filter(Boolean).join('; ')}.`);
+      if (t.talks >= 5) gist.push(`They start ${t.theyStart}% of your ${many(t.talks, 'conversation')}.`);
+      const ids = pr.ids.map(idText).filter((x) => x !== p.name);
+      let html = pfHead(n, `${esc(p.name)}${appDots(p.services)}`, esc(ids.slice(0, 3).join(' · ') || [...new Set(p.chats.map(srcName))].join(', ')), who.length ? `<div class="pf-who">${who.join(' · ')}</div>` : '');
+      html += `<div class="pf-acts">${acts}</div>`;
+      html += `<div class="pf-gist">${gist.join(' ')}${t.total && !pr.oneWay ? `<div class="share"><i style="width:${t.share}%"></i></div><div class="share-lab"><span>You ${nf(t.sent)}</span><span>${esc(p.name)} ${nf(t.recv)}</span></div>` : ''}</div>`;
+      if (pr.years?.length) html += pfSec('Over the years', yearsChart(pr.years, p.name), 'you in blue');
+      if (pr.hours?.some(Boolean) || pr.week?.some(Boolean)) {
+        const wk = [1, 2, 3, 4, 5, 6, 0];
+        html += pfSec('When you talk', `<div class="pf-two"><div>${spark(pr.hours, (i) => `${hourLabel(i)}: ${many(pr.hours[i], 'message')}`)}<div class="spark-lab"><span>midnight</span><span>noon</span><span>11 pm</span></div></div>
+          <div>${spark(wk.map((d) => pr.week[d]), (i) => `${WEEKDAYS[wk[i]]}: ${many(pr.week[wk[i]], 'message')}`)}<div class="spark-lab"><span>Mon</span><span>Sun</span></div></div></div>`);
+      }
+      if (pr.topics?.length) html += pfSec('Talks about', `<div class="pf-chips">${pr.topics.map((x) => topicChip(x.w, x.n, x.shared ? GRAPH.nodes.get(`topic:${x.w}`) : null)).join('')}</div>`, 'outlined ones are shared with others');
+      // Connections, one row a person, with every reason they're connected.
+      const conns = new Map();
+      const connect = (q, why) => { if (!q) return; if (!conns.has(q.id)) conns.set(q.id, { q, why: [] }); conns.get(q.id).why.push(why); };
+      for (const r of pr.relations || []) connect(r.q, `${esc(r.type)}, in your contacts`);
+      for (const x of (pr.together || []).slice(0, 10)) connect(x.q, `in ${many(x.n, 'group')} with them`);
+      for (const x of (pr.mentions?.out || []).slice(0, 10)) connect(x.q, `named ${nf(x.n)}× in your chats with ${esc(p.name)}`);
+      for (const x of (pr.mentions?.into || []).slice(0, 10)) connect(x.q, `${esc(p.name)} is named ${nf(x.n)}× in chats with them`);
+      const unlinked = (pr.relations || []).filter((r) => !r.q).map((r) => `${esc(r.type)}: ${esc(r.name)}`);
+      if (conns.size || unlinked.length) html += pfSec('Connections', [...conns.values()].map(({ q, why }) => nodeRow(q, { why: why.join(' · ') })).join('') + (unlinked.length ? `<div class="pf-empty" style="padding:4px 8px">In your contacts: ${unlinked.join(', ')}</div>` : ''));
+      const mo = (pr.moments || []).map((m) => {
+        const at = dayLinkHtml(m.row, m.d);
+        switch (m.kind) {
+          case 'first': return `<li><b>First message</b>: ${at}, from ${m.me ? 'you' : 'them'}</li>`;
+          case 'busiest': return `<li><b>Busiest day</b>: ${at}, ${many(m.n, 'message')}</li>`;
+          case 'longest': return `<li><b>Longest conversation</b>: ${at}, ${many(m.n, 'message')} without a break of six hours</li>`;
+          case 'streak': return `<li><b>Longest streak</b>: ${many(m.n ?? m.days, 'day')} in a row, ${dayLinkHtml(m.row, m.from || m.d)} to ${dayLinkHtml(m.row, m.to || m.d)}</li>`;
+          case 'silence': return `<li><b>Longest silence</b>: ${lasted(m.n ?? m.days)}, until ${at}</li>`;
+          case 'recent': return `<li><b>Most recent</b>: ${at}</li>`;
+          case 'birthdays': return `<li><b>Birthdays</b>: in touch on ${nf(m.on ?? 0)} of their ${many(m.of ?? 0, 'birthday')} since you first were${m.d ? `, most recently ${at}` : ''}</li>`;
+          default: return '';
+        }
+      }).join('');
+      if (mo) html += pfSec('Moments', `<ul class="pf-list">${mo}</ul>`, 'each a link to that day');
+      const E = pr.events || {};
+      const ev = [];
+      if (E.birthday && !bday) ev.push(`<li><b>Birthday</b>: ${esc(E.birthday.how)} ${esc(E.birthday.text)}${E.birthday.years?.length ? ` (birthday wishes in ${E.birthday.years.join(', ')})` : ''}</li>`);
+      if (E.met) ev.push(`<li><b>Met up</b>: about ${many(E.met.n, 'time')}, going by “on my way”, “I’m outside” and the like${E.met.last ? `; most recently ${dayLinkHtml(E.met.last.row, E.met.last.d)}` : ''}</li>`);
+      if (E.milestones?.length) ev.push(`<li><b>Milestones</b>: ${E.milestones.slice(0, 6).map((e) => `${dayLinkHtml(e.row, e.d)} (${esc(e.kind === 'anniv' ? 'anniversary' : e.hint || 'congratulations')})`).join(', ')}</li>`);
+      if (E.trips?.length) ev.push(`<li><b>Travel</b>: ${E.trips.slice(-6).reverse().map((e) => `${dayLinkHtml(e.row, e.d)}${e.hint ? ` (${esc(e.hint)})` : ''}`).join(', ')}</li>`);
+      if (E.photoDays?.length) ev.push(`<li><b>Photo days</b>: ${E.photoDays.slice(0, 6).map((e) => `${dayLinkHtml(e.row, e.d)} (${nf(e.n)})`).join(', ')}</li>`);
+      if (E.holidays?.length) ev.push(`<li><b>Holidays</b>: ${E.holidays.map((h) => `${esc(h.name)} (${h.years.join(', ')})`).join(', ')}</li>`);
+      if (ev.length) html += pfSec('Events', `<ul class="pf-list">${ev.join('')}</ul>`, 'found in the messages, so likely rather than certain');
+      const shared = [];
+      const media = mediaText(t.kinds) || (t.media ? many(t.media, 'file') : '');
+      if (media) shared.push(busiest ? `<a href="#media" data-media="${busiest.ci}">${esc(media)}</a>` : esc(media));
+      if (t.links) shared.push(many(t.links, 'link'));
+      if (t.calls) shared.push(many(t.calls, 'call'));
+      const em = pr.emoji || {};
+      const emo = (list) => (list || []).slice(0, 6).map(([e]) => esc(e)).join(' ');
+      if (shared.length || emo(em.yours) || emo(em.theirs)) {
+        html += pfSec('Shared', `<ul class="pf-list">${shared.length ? `<li>${shared.join(' · ')}</li>` : ''}${emo(em.yours) ? `<li><b>Your emoji</b>: ${emo(em.yours)}</li>` : ''}${emo(em.theirs) ? `<li><b>Their emoji</b>: ${emo(em.theirs)}</li>` : ''}</ul>`);
+      }
+      const chatRow = (c) => pfRow({ href: `#chat/${c.ci}`, left: avatar(c.title, convColor(c), 'sm'), name: `${esc(c.title)}${appBadge(c)}`, why: `${many(c.messages.length, 'message')}${c.first ? ` · ${fmtDate(c.first)} – ${fmtDate(c.last)}` : ''}` });
+      html += pfSec('Chats', p.chats.map(chatRow).join(''));
+      if (pr.groups?.length) html += pfSec('Groups', pr.groups.map((g) => nodeRow(g.node, { why: `${appName(g.node.service)} · ${many(g.row.messages?.length ?? g.node.w, 'message')}` })).join(''), 'in the graph; open them from their row on their page');
+      return html;
+    }
+    function topicProfile(pr) {
+      const n = pr.node;
+      const people = pr.users.filter((u) => u.node.type === 'person');
+      const groups = pr.users.filter((u) => u.node.type === 'group');
+      let html = pfHead(n, `“${esc(pr.word)}”`, `${pr.phrase ? 'A phrase' : 'A word'} that stands out with ${[people.length && many(people.length, 'person', 'people'), groups.length && many(groups.length, 'group')].filter(Boolean).join(' and ')}`);
+      html += `<div class="pf-acts"><button class="tonal small" data-q="${esc(pr.word)}">Search for it</button></div>`;
+      html += `<div class="pf-gist">Used <b>${many(pr.total, 'time')}</b>${pr.first ? `, ${fmtDate(parseTs(pr.first))} to ${fmtDate(parseTs(pr.last))}` : ''}${pr.peak?.d ? `. Most on one day: ${fmtDate(parseTs(pr.peak.d))} (${nf(pr.peak.n)})` : ''}.</div>`;
+      const max = Math.max(1, ...pr.users.map((u) => u.n));
+      html += pfSec('Who talks about it', pr.users.map((u) => nodeRow(u.node, { why: u.first ? `${fmtDate(parseTs(u.first))} – ${fmtDate(parseTs(u.last))}${u.peakN > 1 ? ` · most on ${fmtDate(parseTs(u.peakDay))} (${nf(u.peakN)})` : ''}` : '', n: `${nf(u.n)}×`, pct: (u.n / max) * 100 })).join(''));
+      if (pr.years?.length) html += pfSec('By year', `${spark(pr.years.map((y) => y.n), (i) => `${pr.years[i].y}: ${many(pr.years[i].n, 'time')}`)}<div class="spark-lab"><span>${pr.years[0].y}</span><span>${pr.years[pr.years.length - 1].y}</span></div>`);
+      if (pr.related?.length) html += pfSec('Related topics', `<div class="pf-chips">${pr.related.map((r) => topicChip(r.node.label, r.shared, r.node)).join('')}</div>`, 'the same people talk about these too');
+      return html;
+    }
+    function groupProfile(pr) {
+      const n = pr.node;
+      const c = pr.row;
+      const t = pr.totals || {};
+      let html = pfHead(n, `${esc(n.label)}${appBadge(c)}`, `${many(pr.members.length, 'person you know', 'people you know')} · ${many(t.total ?? c.messages.length, 'message')}${c.first ? ` · ${fmtDate(c.first)} – ${fmtDate(c.last)}` : ''}`);
+      html += `<div class="pf-acts"><a class="button tonal small" href="#chat/${c.ci}">Open chat</a><a class="button small" href="#stats/${c.ci}">Analyze</a>${t.media ? `<a class="button small" href="#media" data-media="${c.ci}">Media</a>` : ''}</div>`;
+      if (t.total) html += `<div class="pf-gist">You sent <b>${Math.round(((t.sent || 0) / t.total) * 100)}%</b> of its messages.${t.media ? ` ${many(t.media, 'photo or video', 'photos and videos')}.` : ''}</div>`;
+      if (pr.members.length) html += pfSec('Members', pr.members.map((m) => nodeRow(m)).join(''), 'the ones People knows');
+      if (pr.senders?.length) {
+        const max = Math.max(1, ...pr.senders.map((s) => s.n));
+        html += pfSec('Most active', pr.senders.slice(0, 12).map((s) => (s.node ? nodeRow(s.node, { n: nf(s.n), pct: (s.n / max) * 100 }) : pfRow({ href: `#chat/${c.ci}`, left: avatar(s.name, personColor(s.name), 'sm'), name: esc(s.name), n: nf(s.n), pct: (s.n / max) * 100 }))).join(''));
+      }
+      if (pr.topics?.length) html += pfSec('Talked about', `<div class="pf-chips">${pr.topics.map((x) => topicChip(x.w, x.n, x.node)).join('')}</div>`);
+      if (pr.years?.length) html += pfSec('By year', `${spark(pr.years.map((y) => y.n), (i) => `${pr.years[i].y}: ${many(pr.years[i].n, 'message')}`)}<div class="spark-lab"><span>${pr.years[0].y}</span><span>${pr.years[pr.years.length - 1].y}</span></div>`);
+      if (pr.events?.length) html += pfSec('Events', `<ul class="pf-list">${pr.events.slice(-12).reverse().map((e) => eventLine(e)).join('')}</ul>`, 'newest first');
+      return html;
+    }
+    function yearProfile(pr) {
+      const n = pr.node;
+      let html = pfHead(n, esc(pr.y), `${many(pr.total, 'message')} with ${[pr.people.length && many(pr.people.length, 'person', 'people'), pr.groups.length && many(pr.groups.length, 'group')].filter(Boolean).join(' and ') || 'no one'}${pr.media ? ` · ${many(pr.media, 'photo or video', 'photos and videos')}` : ''}`);
+      html += `<div class="pf-acts"><button class="tonal small" data-stats="${esc(pr.y)}-01-01|${esc(pr.y)}-12-31">Analysis for ${esc(pr.y)}</button></div>`;
+      if (pr.months?.length) {
+        const by = new Map(pr.months.map((m) => [m.m.slice(5, 7), m.n]));
+        const vals = Array.from({ length: 12 }, (_, i) => by.get(pad(i + 1)) || 0);
+        html += pfSec('Month by month', `${spark(vals, (i) => `${MONTHS[i]} ${pr.y}: ${many(vals[i], 'message')}`)}<div class="spark-lab"><span>Jan</span><span>Dec</span></div>`);
+      }
+      if (pr.people.length) { const max = Math.max(1, ...pr.people.map((x) => x.n)); html += pfSec('People of the year', pr.people.slice(0, 12).map((x) => nodeRow(x.node, { n: nf(x.n), pct: (x.n / max) * 100 })).join('')); }
+      if (pr.groups.length) html += pfSec('Groups', pr.groups.slice(0, 6).map((x) => nodeRow(x.node, { n: nf(x.n) })).join(''));
+      if (pr.topics?.length) html += pfSec('Talked about', `<div class="pf-chips">${pr.topics.map((x) => topicChip(x.w, x.n, x.node)).join('')}</div>`, 'what stood out this year');
+      if (pr.events?.length) html += pfSec('Events', `<ul class="pf-list">${pr.events.slice(-30).reverse().map((e) => eventLine(e)).join('')}</ul>`, 'newest first, likely rather than certain');
+      if (pr.busiest?.length) html += pfSec('Busiest days', `<ul class="pf-list">${pr.busiest.map((b) => `<li>${dayLinkHtml(b.row, b.d)}: ${many(b.n, 'message')}${b.row ? `, most in ${esc(b.row.title)}` : ''}</li>`).join('')}</ul>`);
+      return html;
+    }
+    function labelProfile(pr) {
+      let html = pfHead(pr.node, esc(pr.name), `A label in your phone’s contacts · ${many(pr.people.length, 'person', 'people')}`);
+      html += pfSec('People', pr.people.map((q) => nodeRow(q)).join(''));
+      return html;
+    }
+    function youProfile(pr) {
+      const t = pr.totals || {};
+      let html = pfHead(pr.node || { type: 'you' }, 'You', `${many(t.chats || 0, 'chat')} · ${many(t.messages || 0, 'message')}${t.first ? ` · ${fmtDate(parseTs(t.first))} – ${fmtDate(parseTs(t.last))}` : ''}`);
+      html += `<div class="pf-gist">You’ve written to <b>${many(t.twoWay || 0, 'person', 'people')}</b>${t.oneWay ? `; ${nf(t.oneWay)} more only wrote to you (codes, alerts, businesses, spam)` : ''}.${t.media ? ` ${many(t.media, 'photo or video', 'photos and videos')} saved.` : ''}
+        <div class="pf-empty" style="margin-top:8px">Click anything to put it at the centre and see what links to it; Shift+click opens it (a person’s page, a search for a topic, a chat, a year’s analysis). The trail above leads back.</div></div>`;
+      if (pr.years?.length) html += pfSec('Over the years', yearsChart(pr.years, 'Received'), 'you in blue');
+      if (pr.people?.length) { const max = Math.max(1, ...pr.people.map((x) => x.n)); html += pfSec('People', pr.people.map((x) => nodeRow(x.node, { n: nf(x.n), pct: (x.n / max) * 100 })).join(''), 'most messages'); }
+      if (pr.topics?.length) html += pfSec('Topics', `<div class="pf-chips">${pr.topics.map((x) => topicChip(x.node.label, x.people, x.node)).join('')}</div>`, 'words and phrases more than one person uses');
+      if (pr.groups?.length) html += pfSec('Groups', pr.groups.map((x) => nodeRow(x.node, { n: nf(x.n) })).join(''));
+      if (pr.mine) html += pfSec('Your birthday', `<div class="pf-empty">Probably ${esc(pr.mine.text || pr.mine.md)}, going by who wished you happy birthday on it${pr.mine.years?.length ? `: ${pr.mine.years.map(([y, k]) => `${nf(k)} in ${y}`).join(', ')}` : ''}.</div>`);
+      return html;
+    }
+    $('#graphSide').addEventListener('click', (e) => {
+      const q = e.target.closest('[data-q]');
+      if (q) { drill({ q: q.dataset.q, sort: 'new' }); return; }
+      const m = e.target.closest('[data-media]');
+      if (m) { e.preventDefault(); mediaFor(+m.dataset.media); return; }
+      const s = e.target.closest('[data-stats]');
+      if (s) { const [from, to] = s.dataset.stats.split('|'); statsFor(from, to); }
+    });
+
     // ---------- routing ----------
-    // #chat/<conversation>/<message>, #people/<a chat of theirs>, #search, #media, #review, #stats/<conversation|all>, #about,
+    // #graph (you) and #graph/<type>/<key> (a person, topic, group, year or label at the centre: the view the
+    // archive opens on), #chat/<conversation>/<message>, #people/<a chat of theirs>, #search, #media, #review, #stats/<conversation|all>, #about,
     // #labels/<Google conversation ID or folder>, which opens that chat's labels,
     // and #chat-id/<Google conversation ID>.
     let mediaRendered = false;
     function route() {
-      const [view = 'chat', a, b] = location.hash.slice(1).split('/');
+      // No hash at all is the graph ('' splits to [''], so a default in the destructuring would never apply).
+      const [view, a, b] = (location.hash.slice(1) || 'graph').split('/');
       if (view === 'chat-id') {
         // From Settings' list of chats: open a chat by its Google conversation ID.
         const id = decodeURIComponent(a || '');
@@ -2061,7 +2633,7 @@
         if (c) setTimeout(() => labelMenu($('#chatLabels'), { chat: c }), 50);
         return;
       }
-      const name = { chat: 'chats', people: 'people', contacts: 'contacts', search: 'search', media: 'media', review: 'review', stats: 'stats', about: 'about' }[view] || 'chats';
+      const name = { graph: 'graph', chat: 'chats', people: 'people', contacts: 'contacts', search: 'search', media: 'media', review: 'review', stats: 'stats', about: 'about' }[view] || 'chats';
       document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
       document.querySelectorAll('nav a').forEach((n) => n.classList.toggle('active', n.dataset.view === name));
       // In Settings, its menu has the views: tell it which one this is.
@@ -2099,6 +2671,8 @@
         renderStats();
       } else if (name === 'about') {
         renderAbout();
+      } else if (name === 'graph') {
+        showGraph(a || '', b != null ? decodeURIComponent(b) : '');
       }
     }
     addEventListener('hashchange', route);
@@ -2115,11 +2689,11 @@
       // Typing in a text field or menu isn't a shortcut; a focused checkbox or button is fine.
       if (document.activeElement.matches('input:not([type="checkbox"]):not([type="radio"]), select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
       const v = document.querySelector('.view.active').id;
-      const tabs = { 1: '#chat', 2: '#people', 3: '#contacts', 4: '#search', 5: '#media', 6: '#review', 7: '#stats', 8: '#about' };
+      const tabs = { 1: '#graph', 2: '#chat', 3: '#people', 4: '#contacts', 5: '#search', 6: '#media', 7: '#review', 8: '#stats', 9: '#about' };
       if (e.key === '/') {
         e.preventDefault();
-        (v === 'view-chats' ? $('#chatSearch') : v === 'view-people' ? $('#pplFilter') : v === 'view-contacts' ? $('#ctFilter') : v === 'view-review' ? $('#rFind') : $('#q')).focus();
-        if (v !== 'view-chats' && v !== 'view-people' && v !== 'view-contacts' && v !== 'view-search' && v !== 'view-review') location.hash = '#search';
+        (v === 'view-chats' ? $('#chatSearch') : v === 'view-people' ? $('#pplFilter') : v === 'view-contacts' ? $('#ctFilter') : v === 'view-review' ? $('#rFind') : v === 'view-graph' ? $('#graphFind') : $('#q')).focus();
+        if (!['view-chats', 'view-people', 'view-contacts', 'view-search', 'view-review', 'view-graph'].includes(v)) location.hash = '#search';
       } else if (tabs[e.key]) {
         location.hash = tabs[e.key];
       } else if (e.key === '?') {

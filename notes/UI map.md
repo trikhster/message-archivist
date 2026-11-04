@@ -1,6 +1,6 @@
 ---
 tags: [ux, reference]
-updated: 2026-10-27
+updated: 2026-11-03
 version: 0.5.0.0
 ---
 # UI map
@@ -64,6 +64,7 @@ Edge cases the index handles: folder not chosen (Home shows the steps, other tab
 ## Viewer
 | Tab | Controls | Edge cases |
 |---|---|---|
+| Graph (the start) | trail (crumbs back to You), focus box (anyone or anything, by name, number or word), 1 step / 2 steps, chips People / Topics / Groups / Years / Labels / One-way senders, app select (with more than one app); the stage: click a node (or Enter on it) to put it at the centre, Shift+click (or Shift+Enter) to open it, hover lights its links, drag to pan, wheel and + − Fit to zoom, legend with what the caps left out; the profile beside it (actions: Their page, ⇄ All apps, Analyze; a topic: Search for it; a year: Analysis for the year), every day a link to it in the chat, every person, topic and group a link into the graph | a big archive: "Reading what your chats are about… 40%" while it opens; no one-to-one chats or groups ("Nothing to map yet"); a focus nothing links to with these filters (a hint); a key in the address that isn't there (falls back to You); from disk and in the app the same |
 | Chats | list (search, sort, sources, label folders, 🔑 Codes / 📣 Promotions / 🤖 Automated folders, Show them everywhere / Keep them apart), header (what kind of texts it is, with It's not; who it's with: 👤 name → their page, "also in" chips, dashed "maybe" chips; find in chat, prev/next, media only, jump to month, 🏷 Labels, Analyze, delete, print), per message ☆ flag and 🏷 labels, people chips | 100k-message chat (0.5.0.0: drawn a month at a time as you scroll); chat.js missing; no dated messages |
 | People | list (search names, numbers, handles; sort: most messages, recent, A–Z, most apps; app dots), the same-name button → every pair (Same person / Not the same / join all), a person's page (Rename…, Same person as…, the same person?, chats with Open / Not them, groups, one timeline 100 at a time) | from disk: read-only, with a note; a person whose chats all split off; nobody yet (no one-to-one chats) |
 | Search | words/phrases, chat, person, label, kind, weekday, hour, dates, sort, context, reset, print, CSV | no filters → help; thousands of results (shown 200 at a time) |
@@ -72,13 +73,13 @@ Edge cases the index handles: folder not chosen (Home shows the steps, other tab
 | Analysis | chat, person, period, every chart clickable | live analyzer with one chat |
 | About | flags export/import, completeness, conversations table | not opened from the extension (flags in the browser only) |
 | Contacts | every person as a circle (photo or initial) with their name or number below, in a grid; search, sort (A–Z, most messages, recent, most apps); a circle → their People page | nobody yet (no one-to-one chats) |
-Keys: 1–8 tabs (Chats, People, Contacts, Search, Media, Review, Analysis, About), / search (in People: the filter), n/N hits, j/k chats or people, p print, t theme, ? help.
+Keys: 1–9 tabs (Graph, Chats, People, Contacts, Search, Media, Review, Analysis, About), / search (in People: the filter; in Graph: the focus box), n/N hits, j/k chats or people, p print, t theme, ? help.
 
 ## The app (installed from GitHub Pages)
-- **One window and one page**: Settings, with one menu down the left (Archive: Chats … About; Manage: Home … Apps; ☰ collapses it to icons), opening on the archive (the viewer in a frame) once there's a folder.
+- **One window and one page**: Settings, with one menu down the left (Archive: Graph, Chats … About; Manage: Home … Apps; ☰ collapses it to icons), opening on the archive's Graph (the viewer in a frame) once there's a folder.
 - **Settings** (`index.html`, Settings without what needs Google Messages): the same tabs; setup steps (choose the folder, start with your phone, keep Google Messages backed up with the extension: a link to the releases); Home's card says the extension does Google Messages backups into the same folder. Backups has no *By itself* column, *Back up* buttons, fix bar, *Back up automatic chats now* or *Add chats…*. Settings keeps the folder, theme and case reference.
 - **Install the app** in the header (until installed); the address bar's install icon does the same.
-- **Archive** tab (the start, Open my backup, the Contacts shortcut): the viewer, always reading the folder; no folder yet → Settings' setup steps.
+- **Archive** tab (the start, Open my backup, the Contacts shortcut): the viewer, always reading the folder, opening on the Graph; no folder yet → Settings' setup steps.
 - **A new version is ready…** notice at the bottom, with **Restart now** and ✕.
 - **Opening a `.tar` with the app** switches to Tools and brings it in (the usual confirm).
 - Edge cases: no folder yet (the app opens on Settings' setup steps); folder access asked for again (Allow access, as in the extension); offline (everything works; nothing needs the network); an action that needs Google Messages (a toast says the extension does it).

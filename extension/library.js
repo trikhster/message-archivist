@@ -770,6 +770,9 @@ globalThis.GMLib = globalThis.GMLib || (() => {
       const o = { i: m.index, d: m.direction === 'sent' ? 1 : 0, s: m.sender, t: m.timestamp, x: m.text };
       if (m.timestamp_precision && m.timestamp_precision !== 'message') o.p = m.timestamp_precision;
       if (m.timestamp_raw) o.tr = m.timestamp_raw;
+      // What the Graph view's analysis needs that the chat view doesn't: a call or notice isn't a message, and a group's senders are matched by number.
+      if (m.kind && m.kind !== 'message') o.kind = m.kind;
+      if (m.sender_number) o.sn = m.sender_number;
       if (m.id) o.id = m.id;
       if (m.media?.length) {
         o.m = m.media.map((md) => ({
@@ -1319,6 +1322,424 @@ globalThis.GMLib = globalThis.GMLib || (() => {
   // modules included.
   const pageFiles = (html) => [...String(html).matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="([^":#?]+\.(?:js|css))"/g)].map((m) => m[1]);
 
+  // ---------- what a chat says ----------
+  // What a chat's messages say, in one pass over them: sent and received,
+  // days, hours and weekdays, reply times, conversations, who said what,
+  // words and phrases, events, photos and links. The Obsidian notes
+  // (obsidian.js) work it out once when a chat is read, keep it in their
+  // manifest (the chat's `a`) and add a person's chats up (mergeAnalyses);
+  // the viewer's graph works it out for every chat it loads. Words never
+  // leave the backup folder. Both shapes of message are read: the records
+  // of messages.json and the compact ones compactMessages writes for
+  // chat.js (`shapeOf`, decided once per call).
+  const STOP = new Set(('the and for you that this with have are was but not your just can what all get its out like got how she him her his they them then than there their when will would could should about from been were one did into our more some any too only also very really yeah yes okay lol haha hahaha lmao omg' +
+    ' it\'s i\'m don\'t that\'s can\'t didn\'t i\'ll you\'re i\'ve isn\'t won\'t let\'s what\'s there\'s doesn\'t wasn\'t https http www com' +
+    ' are has had who why where which while here now well still even back going gonna wanna gotta know think want need make see say said come came take thing things much many way time good great nice sure thanks thank please sorry ' +
+    'saw seen yep yup nope hey hii hello bye today tomorrow tonight yesterday morning night day week let off over again after before because cause cuz though thats dont cant didnt wont youre ive isnt doesnt wasnt idk tbh btw lmk ill ' +
+    'him himself herself myself yourself also ain\'t aren\'t couldn\'t shouldn\'t wouldn\'t haven\'t hasn\'t i\'d you\'ll you\'ve we\'re they\'re he\'s she\'s it\'ll message missed call photo video image sent attachment deleted ' +
+    // Chat filler and greetings, which say nothing about what a chat is about.
+    'happy merry congrats congratulations love miss later soon ready maybe probably actually literally pretty kinda sorta guess wait sounds fine cool awesome amazing ' +
+    'lot lots bit little right first last next every something anything nothing everything someone anyone everyone another other same such own most few ' +
+    'done doing getting trying looking feel feeling set put try tried keep give find tell told ask asked look call text texted send check help use used ' +
+    'tho tmrw tmr tonite nite pls plz thx wow yay aww hmm umm ooh ahh ugh hehe lmfao rofl xoxo meet ' +
+    // Greetings for days the events already find.
+    'birthday bday christmas xmas thanksgiving easter halloween valentine valentines ' +
+    'monday tuesday wednesday thursday friday saturday sunday january february march april june july august september october november december').split(/\s+/));
+  // First names that are also everyday words, which can't be told apart in text.
+  const AMBIG = new Set(('will may june april august mark rose grace hope joy faith bill pat art sue bob jack frank max sky summer autumn dawn rich ' +
+    'january february march july september october november december monday tuesday wednesday thursday friday saturday sunday').split(' '));
+  const WORD = /[\p{L}][\p{L}\p{N}'’-]*/gu;
+  const EMOJI = /\p{Extended_Pictographic}/gu;
+  // Web addresses: kept as links, and left out of the words.
+  const URLS = /\bhttps?:\/\/[^\s<>()]+/g;
+  const GAP = 6 * 3600e3; // a pause this long starts a new conversation
+  const REPLY = [1, 5, 15, 60, 180, 720, 1440]; // minutes: how fast a reply came
+  const REPLY_TEXT = ['in under a minute', 'within 5 minutes', 'within 15 minutes', 'within an hour', 'within 3 hours', 'within 12 hours', 'within a day'];
+  const top = (map, n) => Object.fromEntries([...map].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, n));
+  const bump = (map, k, n = 1) => map.set(k, (map.get(k) || 0) + n);
+  // A media item's kind, in short: photo, video, audio, other file.
+  const KIND = { image: 'p', gif: 'p', sticker: 'p', photo: 'p', video: 'v', audio: 'a', voice: 'a' };
+  const PHOTO_DAY = 5; // photos and videos in a chat in a day that make it a photo day
+  // A message's day from its timestamp ("YYYY-MM-DD HH:MM" or just the date); '' when undated.
+  const day = (t) => t?.slice(0, 10) || '';
+  // Days as numbers (since 1 January 1970), as the notes' manifest keeps them, and back.
+  const dayNum = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5;
+  const numDay = (n) => (n ? new Date(n * 864e5).toISOString().slice(0, 10) : '');
+  // 1 January 1970 was a Thursday.
+  const weekday = (d) => (((dayNum(d) % 7) + 11) % 7);
+
+  // The words and phrases in a message: each word that says something (not
+  // a stopword, a number or a web address), and phrases of two or three such
+  // words ("dog park", "fantasy football league") or of two around a small
+  // word ("game of thrones"). Never across punctuation.
+  const JOIN = new Set(['of', 'the', 'and', 'in', 'on', 'for', 'to', 'a', 'at', 'with', 'n']);
+  // Not laughter ("hahaha"), and not a word drawn out ("sooo"). Words come
+  // again and again, so what each one is is kept.
+  const MEANT = new Map();
+  const meaningful = (k) => {
+    let v = MEANT.get(k);
+    if (v === undefined) {
+      v = k.length >= 3 && k.length <= 24 && !STOP.has(k) && !/\d/.test(k) && !/^(?:h?[aeiou]h?){2,}h?$/.test(k) && !/(.)\1\1/.test(k);
+      if (MEANT.size > 300000) MEANT.clear();
+      MEANT.set(k, v);
+    }
+    return v;
+  };
+  function termsIn(text, each) {
+    for (const part of String(text).replace(URLS, ' ').toLowerCase().split(/[.!?,;:()"“”\r\n]+/)) {
+      const ts = (part.match(WORD) || []).map((w) => w.replace(/’/g, '\'').replace(/^['-]+|['-]+$/g, ''));
+      for (let i = 0; i < ts.length; i++) {
+        if (!meaningful(ts[i])) continue;
+        each(ts[i]);
+        const b = ts[i + 1];
+        const c = ts[i + 2];
+        if (b && meaningful(b) && b !== ts[i]) {
+          each(`${ts[i]} ${b}`);
+          if (c && meaningful(c) && c !== b) each(`${ts[i]} ${b} ${c}`);
+        } else if (b && JOIN.has(b) && c && meaningful(c) && c !== ts[i]) each(`${ts[i]} ${b} ${c}`);
+      }
+    }
+  }
+
+  // Events, found in what each side said on a day (the phrases are English,
+  // with a few other languages' birthday and holiday wishes): birthday and
+  // anniversary wishes, congratulations (and, from the day's words, perhaps
+  // what for), holiday greetings, travel, and meeting up. Kept as
+  // [day, kind, me, hint], `me` 1 when you said it. Nothing about illness or
+  // loss is looked for: getting that wrong would hurt.
+  const BIRTHDAY = /\b(?:happy|hapy|hppy)\s+(belated\s+)?(?:b-?day|birthday|bday|bdy)\b|\bhbd\b|\bmany happy returns\b|\bfeliz cumplea(?:ñ|n)os\b|\bjoyeux anniversaire\b|\balles gute zum geburtstag\b|\bbuon compleanno\b|\bfeliz anivers(?:á|a)rio\b/i;
+  const FOR_NAME = /\b[Hh][Aa][Pp][Pp][Yy]\s+(?:[Bb]elated\s+)?(?:[Bb]-?[Dd]ay|[Bb]irthday|BIRTHDAY|[Bb]day)\s*,?\s*(?:to\s+)?(\p{Lu}\p{Ll}{2,})/u;
+  const ANNIVERSARY = /\bhappy\s+(?:\d+\w*\s+)?anniversary\b/i;
+  const CONGRATS = /\bcongrat(?:s|z|ulations?)?\b|\bmazel tov\b|\bso proud of (?:you|u)\b|\bfelicidades\b|\bf(?:é|e)licitations\b|\bherzlichen gl(?:ü|u)ckwunsch\b/i;
+  const MILESTONES = [
+    ['engagement', /\b(?:engaged|engagement|proposed|fianc(?:é|e)e?)\b/i],
+    ['wedding', /\b(?:wedding|married|newlyweds?|honeymoon)\b/i],
+    ['baby', /\b(?:baby|pregnan\w*|newborn|it'?s a (?:boy|girl)|gave birth)\b/i],
+    ['graduation', /\b(?:graduat\w*|diploma|commencement)\b/i],
+    ['new job', /\b(?:new job|promot(?:ed|ion)|hired|job offer|got the job|new role|offer letter)\b/i],
+    ['new home', /\b(?:new (?:house|home|place|apartment|flat)|moved in|got the keys|bought a (?:house|home|place))\b/i],
+    ['exams', /\b(?:passed (?:the |my |your |her |his )?(?:exam|test|bar|boards)|driving test|got accepted|accepted (?:to|into))\b/i],
+    ['retirement', /\bretir(?:ed|ement|ing)\b/i],
+  ];
+  const HOLIDAYS = [
+    ['Christmas', /\b(?:merry|happy)\s+(?:christmas|xmas|x-mas)\b|\bfeliz navidad\b|\bjoyeux no(?:ë|e)l\b|\bfrohe weihnachten\b/i],
+    ['New Year', /\bhappy\s+new\s+year\b|\bfeliz a(?:ñ|n)o nuevo\b|\bbonne ann(?:é|e)e\b|\bfrohes neues jahr\b/i],
+    ['Lunar New Year', /\bhappy\s+(?:lunar|chinese)\s+new\s+year\b/i],
+    ['Thanksgiving', /\bhappy\s+thanksgiving\b/i],
+    ['Easter', /\bhappy\s+easter\b/i],
+    ['Diwali', /\bhappy\s+diwali\b/i],
+    ['Eid', /\beid\s+mubarak\b/i],
+    ['Hanukkah', /\bhappy\s+(?:hanukkah|chanukah|hanukah)\b/i],
+    ["Mother's Day", /\bhappy\s+mother'?s\s+day\b/i],
+    ["Father's Day", /\bhappy\s+father'?s\s+day\b/i],
+    ["Valentine's Day", /\bhappy\s+valentine'?s?\b/i],
+    ['Halloween', /\bhappy\s+halloween\b/i],
+  ];
+  const TRIP = /\b(?:just|we|i|we've|i've|have|has|finally|safely)\s+landed\b|\blanded\s+(?:in|at|safely)\b|\bboarding\s+(?:now|soon|pass|the plane|in)\b|\blayover\b|\bsafe\s+(?:travels|flight|trip)\b|\bbon voyage\b|\bwheels up\b|\bat the airport\b|\bmy flight\b|\bjet ?lag\b/i;
+  const PLACE = /\b(?:landed in|arrived in|trip to|flying to|flight to|flew to|flying into|vacation in|holiday in|back from)\s+(\p{Lu}[\p{L}'’.-]+(?:\s+\p{Lu}[\p{L}'’.-]+){0,2})/u;
+  const MEET = /\bon my way\b|\bomw\b|\bi'?m outside\b|\bpulling up\b|\bbe there in\b|\brunning (?:a (?:bit|little) )?late\b|\bleaving now\b|\bhere now\b/i;
+  function dayEvents(dn, said, out) {
+    const both = `${said[0]}\n${said[1]}`;
+    if (!both.trim()) return;
+    for (const me of [1, 0]) {
+      const s = said[me];
+      if (!s) continue;
+      const b = s.match(BIRTHDAY);
+      if (b) out.push([dn, 'bday', me, b[1] ? 'belated' : s.match(FOR_NAME)?.[1] || '']);
+      if (ANNIVERSARY.test(s)) out.push([dn, 'anniv', me, '']);
+    }
+    for (const [name, re] of HOLIDAYS) if (re.test(both)) out.push([dn, 'holiday', re.test(said[1]) ? 1 : 0, name]);
+    if (CONGRATS.test(both)) out.push([dn, 'congrats', CONGRATS.test(said[1]) ? 1 : 0, MILESTONES.find(([, re]) => re.test(both))?.[0] || '']);
+    if (TRIP.test(both)) out.push([dn, 'trip', TRIP.test(said[1]) ? 1 : 0, both.match(PLACE)?.[1] || '']);
+    if (MEET.test(both)) out.push([dn, 'meet', MEET.test(said[1]) ? 1 : 0, '']);
+  }
+
+  // The two shapes a chat's messages come in, each read through the same
+  // accessors: the records of messages.json (the notes read those) and the
+  // compact chat.js messages compactMessages writes (the viewer has those).
+  // compactMessages writes a compact message's `kind` and `sn` (sender
+  // number) since the Graph view; a chat.js written before then has neither,
+  // so there a call counts as a message and a group's senders go by name.
+  const RECORD = {
+    me: (m) => (m.direction === 'sent' ? 1 : 0),
+    time: (m) => m.timestamp || '',
+    dayOnly: (m) => m.timestamp_precision === 'day',
+    text: (m) => m.text,
+    sender: (m) => m.sender,
+    number: (m) => m.sender_number,
+    kind: (m) => m.kind,
+    media: (m) => m.media,
+    mediaKind: (md) => md.kind,
+    file: (md) => md.file,
+  };
+  const COMPACT = {
+    me: (m) => (m.d ? 1 : 0),
+    time: (m) => m.t || '',
+    dayOnly: (m) => m.p === 'day',
+    text: (m) => m.x,
+    sender: (m) => m.s,
+    number: (m) => m.sn,
+    kind: (m) => m.kind,
+    media: (m) => m.m,
+    mediaKind: (md) => md.k,
+    file: (md) => md.f,
+  };
+  // Decided once per call, from the first message that has either shape's keys.
+  function shapeOf(msgs) {
+    for (const m of msgs) {
+      if (!m) continue;
+      if ('direction' in m || 'timestamp' in m || 'text' in m) return RECORD;
+      if ('d' in m || 't' in m || 'x' in m) return COMPACT;
+    }
+    return RECORD;
+  }
+
+  // `periods`: the chat's period notes ("2024", "2024-03"), or null when the
+  // messages are in the chat's own note (the viewer passes null). `files`
+  // keeps the path each shape has: from the chat's folder in a record, from
+  // the library's root in a compact message; all else is the same either way.
+  function analyse(msgs, periods) {
+    const F = shapeOf(msgs);
+    const a = { sent: 0, recv: 0, calls: 0, media: 0, kinds: {}, years: {}, hours: Array(24).fill(0), week: Array(7).fill(0),
+      reply: [Array(REPLY.length).fill(0), Array(REPLY.length).fill(0)], starts: [0, 0], talks: 0, longest: null, first: null, last: null,
+      days: {}, mdays: {}, terms: {}, yterms: {}, names: {}, emoji: [{}, {}], links: [], files: [], events: [], senders: [], periods };
+    const counts = new Map();
+    const names = new Map();
+    const emoji = [new Map(), new Map()];
+    const days = new Map();
+    const mdays = new Map();
+    const kinds = new Map();
+    const senders = new Map();
+    let prev = null; // { at, d, me }
+    let talk = null; // { d, n }
+    // The day being read, and what each side said on it, for its events.
+    let today = null;
+    const said = ['', ''];
+    let todayNum = 0;
+    const endDay = () => { if (today) dayEvents(todayNum, said, a.events); said[0] = said[1] = ''; };
+    for (const m of msgs) {
+      const kind = F.kind(m);
+      if (kind === 'call') { a.calls++; continue; }
+      if (kind === 'system') continue;
+      const me = F.me(m);
+      if (me) a.sent++; else a.recv++;
+      const t = F.time(m);
+      const d = day(t);
+      if (d !== today) { endDay(); today = d; todayNum = d ? dayNum(d) : 0; }
+      const timed = t.length > 10 && !F.dayOnly(m);
+      const at = timed ? Date.parse(`${d}T${t.slice(11, 16)}`) : null;
+      if (d) {
+        const y = d.slice(0, 4);
+        (a.years[y] ||= [0, 0])[me]++;
+        bump(days, d);
+        a.week[((todayNum % 7) + 11) % 7]++;
+        if (!a.first) a.first = { d, me };
+        // A conversation: messages without a long pause (or, untimed, on one day).
+        const fresh = !prev || (at != null && prev.at != null ? at - prev.at > GAP : d !== prev.d);
+        if (fresh) {
+          if (talk && (!a.longest || talk.n > a.longest.n)) a.longest = talk;
+          talk = { d, n: 0 };
+          a.starts[me]++;
+          a.talks++;
+        } else if (at != null && prev.at != null && prev.me !== me && at >= prev.at) {
+          const mins = (at - prev.at) / 60e3;
+          const b = REPLY.findIndex((x) => mins <= x);
+          if (b >= 0) a.reply[me][b]++;
+        }
+        talk.n++;
+        prev = { at, d, me };
+      }
+      if (timed) a.hours[+t.slice(11, 13)]++;
+      // Who said it: in a group, by number when there is one, else by name.
+      const number = F.number(m);
+      const sender = F.sender(m);
+      const who = me ? 'me' : number ? `tel:${String(number).replace(/\D/g, '').slice(-10)}` : `name:${nameKey(sender)}`;
+      const s = senders.get(who);
+      if (s) s.n++; else senders.set(who, { name: me ? 'Me' : formatNumber(sender || number || '?'), n: 1 });
+      const text = String(F.text(m) || '');
+      if (text) {
+        for (const u of text.match(URLS) || []) a.links.push([u, d]);
+        termsIn(text, (k) => bump(counts, k));
+        // Capitalised words not starting a sentence: names, for mentions.
+        for (const sentence of text.replace(URLS, ' ').split(/[.!?]+\s+|\n+/)) {
+          const ws = sentence.match(WORD) || [];
+          for (let i = 1; i < ws.length; i++) if (/^\p{Lu}\p{Ll}{2,}$/u.test(ws[i])) bump(names, ws[i].toLowerCase());
+        }
+        for (const e of text.match(EMOJI) || []) bump(emoji[me], e);
+        if (d && said[me].length < 8000) said[me] += `\n${text}`;
+      }
+      for (const md of F.media(m) || []) {
+        a.media++;
+        const k = KIND[F.mediaKind(md)] || 'f';
+        bump(kinds, k);
+        const file = F.file(md);
+        if (file) {
+          a.files.push([file, todayNum, me, k]);
+          if (d && (k === 'p' || k === 'v')) bump(mdays, d);
+        }
+      }
+    }
+    endDay();
+    if (talk && (!a.longest || talk.n > a.longest.n)) a.longest = talk;
+    a.last = prev?.d || null;
+    a.days = Object.fromEntries(days);
+    a.mdays = Object.fromEntries(mdays);
+    a.kinds = Object.fromEntries(kinds);
+    a.names = top(names, 60);
+    a.emoji = emoji.map((e) => top(e, 8));
+    a.senders = [...senders].sort((x, y) => y[1].n - x[1].n).slice(0, 25).map(([k, v]) => [k, v.name, v.n]);
+    // The newest, enough for the notes.
+    a.links = a.links.slice(-300);
+    a.files = a.files.slice(-10000);
+    a.events = a.events.slice(-800);
+
+    // The chat's words and phrases, read again for the most used ones: how
+    // often, the first and last day, the day most, and each year's.
+    const best = (list, n, min) => list.filter(([, c]) => c >= min).sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, n);
+    const chosen = new Map([...best([...counts].filter(([k]) => !k.includes(' ')), 100, 2), ...best([...counts].filter(([k]) => k.includes(' ')), 40, 3)]
+      .map(([k]) => [k, { n: 0, f: 0, l: 0, cd: 0, cn: 0, pd: 0, pn: 0, y: {} }]));
+    if (chosen.size) {
+      let last = null;
+      let dn = 0;
+      for (const m of msgs) {
+        const text = F.text(m);
+        const kind = F.kind(m);
+        if (!text || kind === 'call' || kind === 'system') continue;
+        const d = day(F.time(m));
+        if (d !== last) { last = d; dn = d ? dayNum(d) : 0; }
+        termsIn(text, (k) => {
+          const r = chosen.get(k);
+          if (!r) return;
+          r.n++;
+          if (!dn) return;
+          if (!r.f || dn < r.f) r.f = dn;
+          if (dn > r.l) r.l = dn;
+          if (r.cd === dn) r.cn++;
+          else { if (r.cn > r.pn) { r.pd = r.cd; r.pn = r.cn; } r.cd = dn; r.cn = 1; }
+          r.y[d.slice(0, 4)] = (r.y[d.slice(0, 4)] || 0) + 1;
+        });
+      }
+      const years = {};
+      for (const [k, r] of chosen) {
+        if (r.cn > r.pn) { r.pd = r.cd; r.pn = r.cn; }
+        a.terms[k] = [r.n, r.f, r.l, r.pd, r.pn];
+        for (const [y, n] of Object.entries(r.y)) (years[y] ||= []).push([k, n]);
+      }
+      for (const [y, list] of Object.entries(years)) a.yterms[y] = best(list, 12, 2);
+    }
+    return a;
+  }
+
+  // A person's chats, added up.
+  function mergeAnalyses(list) {
+    const t = { sent: 0, recv: 0, calls: 0, media: 0, kinds: {}, years: {}, hours: Array(24).fill(0), week: Array(7).fill(0),
+      reply: [Array(REPLY.length).fill(0), Array(REPLY.length).fill(0)], starts: [0, 0], talks: 0, days: {}, terms: {}, yterms: {}, emoji: [{}, {}] };
+    const add = (into, from) => { for (const [k, v] of Object.entries(from || {})) into[k] = (into[k] || 0) + v; };
+    for (const a of list) {
+      for (const k of ['sent', 'recv', 'calls', 'media', 'talks']) t[k] += a[k] || 0;
+      for (const [y, [s, r]] of Object.entries(a.years || {})) { const v = (t.years[y] ||= [0, 0]); v[0] += s; v[1] += r; }
+      for (let i = 0; i < 24; i++) t.hours[i] += a.hours?.[i] || 0;
+      for (let i = 0; i < 7; i++) t.week[i] += a.week?.[i] || 0;
+      for (let s = 0; s < 2; s++) { t.starts[s] += a.starts?.[s] || 0; for (let i = 0; i < REPLY.length; i++) t.reply[s][i] += a.reply?.[s]?.[i] || 0; add(t.emoji[s], a.emoji?.[s]); }
+      add(t.days, a.days);
+      add(t.kinds, a.kinds);
+      for (const [w, [n, f, l, pd, pn]] of Object.entries(a.terms || {})) {
+        const x = t.terms[w];
+        if (!x) t.terms[w] = [n, f, l, pd, pn];
+        else { x[0] += n; if (f && (!x[1] || f < x[1])) x[1] = f; if (l > x[2]) x[2] = l; if (pn > x[4]) { x[3] = pd; x[4] = pn; } }
+      }
+      for (const [y, ws] of Object.entries(a.yterms || {})) { const m = (t.yterms[y] ||= {}); for (const [w, n] of ws) m[w] = (m[w] || 0) + n; }
+    }
+    return t;
+  }
+  // How fast someone usually replies, from a histogram.
+  function usually(h) {
+    const n = h.reduce((x, y) => x + y, 0);
+    if (n < 5) return null;
+    let c = 0;
+    for (let i = 0; i < h.length; i++) { c += h[i]; if (c >= n / 2) return REPLY_TEXT[i]; }
+    return null;
+  }
+
+  // Topics: words and phrases. People's own names are connections, not topics.
+  const hasName = (w, named) => w.split(' ').some((x) => named.has(x));
+  // One of a word and a phrase holding it, on the same list, says nothing
+  // more: a word or shorter phrase with hardly more uses than the longer one
+  // ("fantasy" beside "fantasy football") goes, and so does a longer phrase
+  // round a phrase used more ("fantasy football league" beside "fantasy
+  // football"). Used about as much, the phrase more people share (`df`)
+  // stays, since shared phrases are what link people.
+  const inside = (a, b) => b.length > a.length && ` ${b} `.includes(` ${a} `);
+  const dedupe = (list, df) => {
+    const d = (x) => df?.get(x) || 0;
+    return list.filter(([w, n]) => !list.some(([v, m]) => (inside(w, v) && n <= m * 1.25 && !(w.includes(' ') && d(w) > d(v)))
+      || (inside(v, w) && v.includes(' ') && (m > n * 1.25 || (d(v) > d(w) && m * 1.25 >= n)))));
+  };
+  // What each person (and group chat) talks about that most others don't:
+  // their words and phrases, weighed against how many others use them
+  // (TF-IDF; a phrase counts half as much again, being rarer). One among the
+  // topics of two of them or more becomes a note that links them.
+  function standout(docs, named) {
+    const df = new Map();
+    for (const d of docs) for (const w of Object.keys(d.terms)) bump(df, w);
+    const N = docs.length;
+    const of = new Map();
+    const nodes = new Map();
+    for (const d of docs) {
+      const scored = Object.entries(d.terms)
+        .filter(([w, [n]]) => n >= 3 && !hasName(w, named) && (N < 6 || df.get(w) <= Math.max(2, N / 2)))
+        .map(([w, [n]]) => [w, n, n * Math.log(1 + N / df.get(w)) * (w.includes(' ') ? 1.5 : 1)])
+        .sort((x, y) => y[2] - x[2] || (x[0] < y[0] ? -1 : 1))
+        .slice(0, 25);
+      const list = dedupe(scored, df).slice(0, 12);
+      of.set(d, list.map(([w, n]) => ({ w, n, t: d.terms[w] })));
+      for (const [w, n] of list) { if (!nodes.has(w)) nodes.set(w, []); nodes.get(w).push({ d, n, t: d.terms[w] }); }
+    }
+    for (const [w, list] of nodes) if (list.length < 2) nodes.delete(w);
+    return { of, nodes };
+  }
+  // What stood out each year (`years`: year -> Map(term -> uses)): a year's
+  // words and phrases weighed against how many years use them.
+  function byYear(years, named, keep, min) {
+    const used = new Map();
+    for (const m of years.values()) for (const [w, n] of m) if (n >= min) bump(used, w);
+    const Y = years.size;
+    const out = new Map();
+    for (const [y, m] of years) {
+      const list = [...m].filter(([w, n]) => n >= min && !hasName(w, named))
+        .map(([w, n]) => [w, n, n * Math.log(1 + Y / (used.get(w) || 1)) * (w.includes(' ') ? 1.5 : 1)])
+        .sort((x, z) => z[2] - x[2] || (x[0] < z[0] ? -1 : 1))
+        .slice(0, keep * 3);
+      out.set(y, dedupe(list).slice(0, keep).map(([w, n]) => ({ w, n })));
+    }
+    return out;
+  }
+
+  // Who's named in whose chats: a person's first name, when no one else has
+  // it and it isn't also an everyday word, capitalised mid-sentence.
+  // `cache`: Map(chat row -> its analysis).
+  function mentionsOf(P, cache) {
+    const first = new Map();
+    for (const p of P.list) {
+      const f = /\p{L}/u.test(p.name) ? p.name.split(/\s+/)[0].toLowerCase().normalize('NFC') : '';
+      if (f.length >= 3 && /^\p{L}+$/u.test(f) && !STOP.has(f) && !AMBIG.has(f)) { if (!first.has(f)) first.set(f, []); first.get(f).push(p); }
+    }
+    const out = new Map(P.list.map((p) => [p, []]));
+    const into = new Map(P.list.map((p) => [p, []]));
+    for (const p of P.list) {
+      const said = new Map();
+      for (const r of p.chats) for (const [w, n] of Object.entries(cache.get(r)?.names || {})) bump(said, w, n);
+      for (const [f, qs] of first) {
+        const n = said.get(f) || 0;
+        if (qs.length !== 1 || qs[0] === p || n < 2) continue;
+        out.get(p).push({ q: qs[0], n });
+        into.get(qs[0]).push({ q: p, n });
+      }
+    }
+    for (const m of [out, into]) for (const l of m.values()) l.sort((x, y) => y.n - x.n);
+    return { out, into };
+  }
+
   const README = `Message Archivist library: your conversations, from every app
 
 index.html                          Open this in your browser: every chat, search,
@@ -1387,6 +1808,7 @@ thumbnail. RCS photos are full size; SMS/MMS photos are compressed by the carrie
     INDEX_VERSION, sigOf, keyOf, unknownIn, webFills, keepWebRead, oneWebCopy, webMediaPut, webMediaGet, webMediaDropChat, mergeChrono, imageFingerprint, sameImage, betterCopy,
     MEDIA_STATUS, mediaStatus, mediaIndex, mediaCounts, mediaIndexCsv,
     compactMessages, chatScript, contactSummary, chatCsv, joinCsv,
+    analyse, mergeAnalyses, standout, byYear, mentionsOf, usually, termsIn, dayNum, numDay, weekday, REPLY, REPLY_TEXT, HOLIDAYS, PHOTO_DAY, STOPWORDS: STOP, AMBIG, WORD,
     checkChat, STATUS_LABEL, verificationOf, summarize, indexScript, parseIndex, readLibrary,
     parseSums, formatSums, sha256, safeName, README,
   };

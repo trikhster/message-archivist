@@ -201,6 +201,16 @@ The viewer keeps chats of **verification codes**, **promotions and spam**, and *
 - **To leave them out of your archive altogether**, go to Settings → *Leave out of your archive* and tick verification codes, promotions and spam, or other automated texts. "Back up everything" then skips those chats, and so does **Bring in files…**. Backing up one chat yourself, and your automatic backup list, still save what you chose.
 - **Find the ones already in my archive…** lists the chats already saved and, if you click **Move them out of my archive**, moves them into the `removed-chats` folder in your backup folder. Delete that folder to remove them for good. "Back up everything" leaves them out from then on, unless you untick the box again.
 
+## The graph
+
+The viewer opens on the **Graph** view: your archive as nodes and links, as Obsidian's graph shows a vault, but never all of it at once. You are at the centre, with the people you write to, what you talk about, your groups and your years around you; the same view is in the app and in your backup folder's `index.html`.
+
+- **Click** a node to put it at the centre and see what links to it; **Shift+click** opens it (a person's page, a search for a topic, a group's chat, a year's analysis). The trail at the top leads back, and the focus box finds anyone or anything by name, number or word.
+- **1 step** draws what links to the focus, **2 steps** what links to that too (a few of each, the heaviest first; the legend says what was left out). The chips turn **People**, **Topics**, **Groups**, **Years** and **Labels** (from your phone's contacts) on and off, and **One-way senders** shows people you've never written to (codes, alerts, businesses, spam), who are out by default. With more than one app, a menu keeps to one app's people.
+- **What links what**: a person to the topics they talk about (words and phrases that stand out in your chats with them and that someone else uses too), to the people they name and who name them (a dashed arrow), to the people they're in groups with, to their groups, their years and their contact labels; a topic to the people and groups who use it; a year to its people and groups. A topic's related topics and a year's topics and events are in their profiles.
+- **The profile** beside the graph is the focus's page: for a person, the gist (messages and dates, your share, how fast each of you usually replies, who starts your conversations), **Over the years**, **When you talk**, **Talks about**, **Connections** (with why: a relation in your contacts, groups in common, who names whom), **Moments** (first message, busiest day, longest conversation, longest streak, longest silence, most recent, birthdays you were in touch on), **Events** (a likely birthday, meeting up, milestones, travel, photo days, holidays), **Shared** (photos and videos, links, calls, each side's emoji), their chats and groups. Every day is a link to that day in the chat. A topic's profile: who talks about it, by year, related topics. A year's: month by month, people of the year, what was talked about, events, busiest days. A group's: members, who's most active, what it talks about.
+- Everything is counted in the viewer as it opens (a progress line on a big archive), with the same analysis the Obsidian notes use; nothing is sent anywhere. Drag to pan, wheel or **+ −** to zoom, **Fit** to reset. Keys: **1** opens the graph, **/** the focus box.
+
 ## People
 
 The viewer's **People** tab shows everyone you have a one-to-one chat with, and puts each person's chats together across apps, accounts and numbers.
@@ -342,7 +352,7 @@ Run that inside the backup folder. Every file listed should report `OK`; anythin
 
 ## The viewer
 
-Click **Open my backup** in the popup, or open Settings: it opens on your backup, with its views (Chats, People, Contacts…) and the rest of Settings in one menu down the left. **Contacts** shows everyone as a circle with their name or number below; click someone for every chat with them. The same viewer is also saved in the backup folder as `index.html`, which works offline straight from disk, without the extension.
+Click **Open my backup** in the popup, or open Settings: it opens on your backup's **Graph**, with its other views (Chats, People, Contacts…) and the rest of Settings in one menu down the left. **Contacts** shows everyone as a circle with their name or number below; click someone for every chat with them. The same viewer is also saved in the backup folder as `index.html`, which works offline straight from disk, without the extension.
 
 - **Lists:** every list of chats and people puts favourites first (pinned in Google Messages, a starred contact on your phone, or labelled Favorites), then names A–Z, then chats known only by a number; numbers are shown one way everywhere, such as (555) 020-0001.
 - **Chats:** the conversation list, find-in-chat, people filters, media only, jump to a month, and a Google Photos-style month/year scrubber. Hover a time to see the raw timestamp and the message ID. As in Google Messages, a run of messages from one person in the same minute shows its time once, under the last one; reactions show as a small pill under the message, including the ones a phone saves as texts (`❤️ to “See you soon”`, `Loved “…”`), which are shown on the message they're about rather than as messages. Long chats are drawn a month at a time as you scroll, and photos are read from the backup folder only when they come near the screen, so a chat of years of daily texts opens quickly.
@@ -380,7 +390,7 @@ Click **Open my backup** in the popup, or open Settings: it opens on your backup
 
   | Key | Action |
   |---|---|
-  | 1–6 | Switch tabs: Chats, Search, Media, Review, Analysis, About |
+  | 1–9 | Switch tabs: Graph, Chats, People, Contacts, Search, Media, Review, Analysis, About |
   | / | Search |
   | n / N | Next / previous match in the chat |
   | j / k | Next / previous chat |

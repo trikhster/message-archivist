@@ -27,7 +27,7 @@ const WEB_FILES = ls('extension/web', '.js');
 const AREAS = [
   { id: 'core', label: 'Extension: backing up Google Messages', color: '5', files: ['extension/content.js', 'extension/writer.js', 'extension/background.js', 'extension/zip.js'] },
   { id: 'shared', label: 'Shared: the library and Obsidian notes', color: '4', files: ['extension/library.js', 'extension/obsidian.js'] },
-  { id: 'pages', label: 'Extension pages: popup, Settings, viewer', color: '6', files: ['extension/popup.js', 'extension/options.js', 'extension/viewer.js', 'extension/theme.js'] },
+  { id: 'pages', label: 'Extension pages: popup, Settings, viewer', color: '6', files: ['extension/popup.js', 'extension/options.js', 'extension/viewer.js', 'extension/graph.js', 'extension/theme.js'] },
   { id: 'import', label: "Importers: other apps' exports and web pages", color: '2', files: [REGISTRY, ...APP_FILES, ...WEB_FILES] },
   { id: 'app', label: 'The installable app and tooling', color: '3', files: ['app/app.js', 'app/sw.js', ...ls('scripts', '.mjs')] },
   { id: 'android', label: 'Android app', color: '1', files: ls(KT, '.kt') },
@@ -37,7 +37,7 @@ const AREAS = [
 const NOTES = {
   'extension/content.js': 'Content script', 'extension/writer.js': 'Writer frame', 'extension/background.js': 'Background worker',
   'extension/zip.js': 'Small files', 'extension/library.js': 'Library module', 'extension/obsidian.js': 'Obsidian notes',
-  'extension/popup.js': 'Popup', 'extension/options.js': 'Settings page', 'extension/viewer.js': 'Viewer', 'extension/theme.js': 'Small files',
+  'extension/popup.js': 'Popup', 'extension/options.js': 'Settings page', 'extension/viewer.js': 'Viewer', 'extension/graph.js': 'Graph', 'extension/theme.js': 'Small files',
   'app/app.js': 'App', 'app/sw.js': 'App', 'scripts/build-app.mjs': 'App', 'scripts/serve-app.mjs': 'App',
   'scripts/code-map.mjs': 'Code map', 'scripts/check.mjs': 'Testing', 'scripts/package.mjs': 'Releasing', 'scripts/set-version.mjs': 'Releasing',
   'extension/web/snapchat.js': 'Snapchat Web page',
@@ -86,6 +86,8 @@ const SEGMENTS = [
     to: ['extension/options.js#the settings form', 'extension/options.js#every chat (the backup index)', 'extension/options.js#deleting a chat from the backup'] },
   { id: 'viewer', title: 'Archive viewer', color: '6', note: 'Viewer', text: 'Reading, searching and analysing the archive offline.',
     to: ['extension/viewer.js#chat view', 'extension/viewer.js#global search', 'extension/viewer.js#analysis'] },
+  { id: 'graph', title: 'The graph', color: '6', note: 'Graph', text: 'The archive as nodes and links around one focus (you, a person, a topic, a group, a year), with a profile beside it; the view the archive opens on.',
+    to: ['extension/graph.js', 'extension/viewer.js#graph', 'extension/viewer.js#profiles', 'extension/library.js#what a chat says'] },
   { id: 'obsidian', title: 'Notes for Obsidian', color: '4', note: 'Obsidian notes', text: 'The archive as an Obsidian vault.', to: ['extension/obsidian.js', 'extension/options.js#Obsidian'] },
   { id: 'webapp', title: 'The installable app', color: '3', note: 'App', text: 'Settings and the viewer as a web app on Chrome or Edge.', to: ['app/app.js', 'scripts/build-app.mjs'] },
   { id: 'restore', title: 'Android restore', color: '1', note: 'Restore package', text: 'Settings writes a restore package; the phone app writes it into the SMS/MMS database.',

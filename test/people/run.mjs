@@ -1,9 +1,11 @@
 // Checks who's who across apps, accounts and numbers (GMLib.people and the
-// owner's joins, splits and names), and the Obsidian notes made from a small
-// library (GMObsidian): where they go, how a chat's messages are split into
-// notes, that message text reads literally, photos embedded, and that updates
-// leave unchanged notes and the owner's own notes alone. All names, numbers
-// and texts here are invented.
+// owner's joins, splits and names), that what a chat says (GMLib.analyse)
+// reads the same from messages.json records and the viewer's compact
+// messages, and the Obsidian notes made from a small library (GMObsidian):
+// where they go, how a chat's messages are split into notes, that message
+// text reads literally, photos embedded, and that updates leave unchanged
+// notes and the owner's own notes alone. All names, numbers and texts here
+// are invented.
 // node test/people/run.mjs
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -121,6 +123,55 @@ const byTitle = (P, title, service = 'sms') => P.list.find((p) => p.chats.some((
   check('joined after all: "not the same" is forgotten', byTitle(Q, 'Alex Doe') === byTitle(Q, 'Alex Doe', 'messenger') && !saved.apart.length);
   const back = JSON.parse(JSON.stringify(saved));
   check('decisions survive people.json', G.people(ROWS, back).list.length === Q.list.length && back.version === G.PEOPLE_VERSION);
+}
+
+// ---------- the same analysis from the viewer's compact messages ----------
+// The notes analyse messages.json records; the viewer's graph analyses the
+// compact chat.js messages compactMessages writes from the same records.
+// Both must say the same of a chat, down to the day a phrase came up most.
+{
+  const m = (o) => ({ direction: 'received', timestamp_precision: 'message', media: [], ...o });
+  const ana = { sender: 'Ana Lopez', sender_number: '5550100801' };
+  const ben = { sender: 'Ben Carter', sender_number: '5550100802' };
+  const me = { direction: 'sent', sender: 'Me' };
+  const folder = 'conversations/Ana Lopez, Ben Carter';
+  // A group: a reply each way, a call, a day without a time, a birthday wish by name, media with and without a file, a link, a phrase four times, meeting up, and an undated message.
+  const msgs = [
+    m({ index: 1, ...ana, timestamp: '2024-03-01 09:00', text: 'clay workshop this friday? see https://example.net/kiln' }),
+    m({ index: 2, ...me, timestamp: '2024-03-01 09:03', text: 'yes! clay workshop it is 🎉', reply_to: { sender: 'Ana Lopez', text: 'clay workshop this friday?' } }),
+    m({ index: 3, ...ana, timestamp: '2024-03-01 09:04', kind: 'call', text: 'Missed call' }),
+    m({ index: 4, ...ana, timestamp: '2024-03-02', timestamp_precision: 'day', text: 'Happy birthday Ben!' }),
+    m({ index: 5, ...ben, timestamp: '2024-03-02 19:30', text: 'thanks! clay workshop was fun', media: [{ kind: 'image', file: 'media/2024-03-02 19.30 - Ben Carter.jpg' }, { kind: 'video', file: null, skipped: 'not in the export' }] }),
+    m({ index: 6, ...me, timestamp: '2024-03-09 20:00', text: 'clay workshop again 🎉🎉' }),
+    m({ index: 7, ...ben, timestamp: '2024-03-09 20:20', text: 'on my way', media: [{ kind: 'audio', file: 'media/2024-03-09 20.20 - Ben Carter.m4a' }] }),
+    m({ index: 8, ...ana, timestamp: '', text: 'no date here' }),
+  ];
+  const J = JSON.stringify;
+  const notes = G.analyse(msgs, null);
+  check('the chat exercises analyse: counts, replies each way, hours, a link, senders by number, media kinds, a phrase, events',
+    notes.sent === 2 && notes.recv === 5 && notes.calls === 1 && notes.reply[1][1] === 1 && notes.reply[0][3] === 1 && notes.hours.reduce((a, b) => a + b) === 5 && notes.links.length === 1
+    && notes.senders.some(([k]) => k === 'tel:5550100802') && J(notes.kinds) === '{"p":1,"v":1,"a":1}' && notes.files.length === 2 && notes.terms['clay workshop']?.[0] === 4 && J(notes.starts) === '[2,1]'
+    && notes.events.some(([, k, w, h]) => k === 'bday' && w === 0 && h === 'Ben') && notes.events.some(([, k]) => k === 'meet'),
+    J({ sent: notes.sent, recv: notes.recv, calls: notes.calls, reply: notes.reply, hours: notes.hours, kinds: notes.kinds, terms: Object.keys(notes.terms), starts: notes.starts, events: notes.events, senders: notes.senders }));
+  // compactMessages carries a message's kind (a call, a notice) and its
+  // sender's number as `kind` and `sn`, which analyse reads, so a call and a
+  // group's senders read the same both ways.
+  const compact = G.compactMessages(folder, msgs);
+  check('compact messages carry a call\'s kind and the sender\'s number, and nothing when there is none', compact[2].kind === 'call' && compact[0].sn === '5550100801' && !('kind' in compact[0]) && !('sn' in compact[1]), J(compact[2]));
+  const viewer = G.analyse(compact, null);
+  for (const k of ['sent', 'recv', 'days', 'terms', 'events', 'hours', 'week', 'reply', 'starts', 'talks', 'emoji', 'kinds', 'media']) check(`compact messages: the same ${k}`, J(notes[k]) === J(viewer[k]), `${J(notes[k])} vs ${J(viewer[k])}`);
+  const rest = ['calls', 'mdays', 'years', 'yterms', 'names', 'longest', 'first', 'last', 'links', 'senders', 'periods'];
+  check('…and all else but the files', rest.every((k) => J(notes[k]) === J(viewer[k])), rest.filter((k) => J(notes[k]) !== J(viewer[k])).join(', '));
+  check('…whose paths differ only by the chat folder', J(viewer.files) === J(notes.files.map(([f, ...x]) => [`${folder}/${f}`, ...x])), `${J(notes.files)} vs ${J(viewer.files)}`);
+  // A chat.js written before the graph (no kind, no sn): the same words, days and events, but the call counts as a message.
+  const older = G.analyse(G.compactMessages(folder, msgs).map(({ kind, sn, ...c }) => c), null);
+  check('older compact messages, without kind and sn: the same words and events, the call a message', J(older.terms) === J(notes.terms) && J(older.events) === J(notes.events) && older.calls === 0 && older.recv === notes.recv + 1, J({ calls: older.calls, recv: older.recv }));
+  const ws = [];
+  G.termsIn('clay workshop again', (k) => ws.push(k));
+  check('the helpers the notes call are GMLib\'s', G.numDay(G.dayNum('2024-03-02')) === '2024-03-02' && G.weekday('2024-03-02') === 6 && G.STOPWORDS.has('the') && G.AMBIG.has('will') && 'clay workshop'.match(G.WORD).length === 2
+    && G.usually([0, 3, 2, 0, 0, 0, 0]) === G.REPLY_TEXT[1] && G.REPLY.length === G.REPLY_TEXT.length && G.PHOTO_DAY === 5 && G.HOLIDAYS.some(([n]) => n === 'Christmas') && J(ws) === '["clay","clay workshop","workshop"]', J(ws));
+  check('a person\'s chats add up, and a phrase two share is a topic', G.mergeAnalyses([notes, viewer]).sent === 4 && G.mergeAnalyses([notes, viewer]).terms['clay workshop'][0] === 8
+    && G.standout([{ kind: 'person', id: 'a', terms: notes.terms }, { kind: 'person', id: 'b', terms: viewer.terms }], new Set()).nodes.has('clay workshop'));
 }
 
 // ---------- Obsidian ----------
@@ -261,7 +312,7 @@ const MONTHLY = { small: 0, busyYear: 0 };
   check('a person note opens with the gist', a.includes('> [!summary]') && a.includes('You sent 49% of them.') && a.includes('You usually reply within 5 minutes'), a.slice(0, 600));
   check('…and who starts the conversations', a.includes('conversations: 4') && a.includes('they_start: 100'));
   check('moments lead to their day in the messages', a.includes(`- **First message**: [[${chat}#Sunday, 1 March 2020|1 March 2020]], from them`) && a.includes('- **Longest streak**: 3 days in a row') && a.includes(`- **Longest silence**: 1 year and 3 months, until [[${chat}#Thursday, 10 June 2021|10 June 2021]]`), a.split('## Moments')[1]?.slice(0, 600));
-  check('the years, newest first, with a bar (a link\'s | escaped in the table)', a.includes(`| [[${chat}\\|2021]] | 1 |`) && a.indexOf('|2021]]') < a.indexOf('|2020]]') && a.includes('████'), a.split('## Over the years')[1]?.slice(0, 400));
+  check('the years, newest first, with a bar (a link\'s | escaped in the table), and the share from you', a.includes(`| [[${chat}\\|2021]] | 1 | 0% |`) && a.indexOf('|2021]]') < a.indexOf('|2020]]') && a.includes('████'), a.split('## Over the years')[1]?.slice(0, 400));
   check('when you talk', a.includes('Mostly in the morning, busiest on Sundays.') || a.includes('Mostly in the morning, busiest on'), a.split('## When you talk')[1]?.slice(0, 200));
   check('a topic shared with someone else is a note that links them', a.includes('[[Obsidian/Topics/hiking|hiking]]') && files.get('Obsidian/Topics/hiking.md')?.includes('[[Obsidian/People/Ben Carter|Ben Carter]]'), a.split('Talks about')[1]?.slice(0, 200));
   check('…one only they talk about is just a word', files.get('Obsidian/People/Cleo Ward.md').includes('**Talks about** pottery') && !files.has('Obsidian/Topics/pottery.md'));

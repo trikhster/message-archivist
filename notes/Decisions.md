@@ -1,6 +1,6 @@
 ---
 tags: [decisions]
-updated: 2026-10-26
+updated: 2026-11-03
 ---
 # Decisions
 
@@ -156,3 +156,6 @@ Marketing texts word their opt-out line every which way ("STOP=end", "Stop2End",
 
 ### Backing up some chats: chosen each time, never a setting (unreleased)
 Backing up only some chats is for a one-off file (a conversation to keep or share), so it's chosen on **Back up this phone** each time and never saved: automatic backups are always of every chat, and a run of some chats doesn't count as the automatic backup's run. Choosing is explicit, so a chosen chat goes in even when Settings would leave it out; the list starts as an ordinary backup would (those kinds' chips off), and left that way it *is* an ordinary backup, so opening the list changes nothing. Its type chips decide what's in the backup, not only what's listed: a chat of a hidden type is never backed up, ticked or not, so nothing out of sight goes in. Sizes are worked out only while the list is open, in the background, since they mean asking the phone for every photo's size. An update of some chats never drops the file's others: it brings the chosen ones up to date and carries the rest over as they were.
+
+## The graph: an ego graph with a focus, and the view the archive opens on (2026-11-03)
+The owner wanted the archive viewable as nodes, as Obsidian shows a vault, with drill-downs and the associations between people, topics and time, and a profile on each person that adds their data up, "but find better ways to visualize". Obsidian's global graph of the live vault had already shown the problem ([[Investigations and graph]]: 2,600 notes, 11,800 links, the index and calendar notes drowning the connections), so the viewer's graph is **never the whole archive**: an ego graph around one focus, a step or two out, a few nodes of each kind (the heaviest first, with the legend saying what was left out), laid out deterministically in rings and sectors by type rather than by physics, so the same question always looks the same and can be screenshotted for a report. Drilling down is a hash change (`#graph/<type>/<key>`), so the browser's back button, links from elsewhere and the trail all work alike. The profile beside it is the Obsidian person note as data, drawn rather than written (`GMGraph.profile`), so the notes and the viewer say the same things about a person; to make that true the analysis moved from `obsidian.js` into `library.js` (`GMLib.analyse`, reading both the notes' records and the viewer's compact messages). It's computed in the browser each time the viewer opens, a few chats at a time, rather than cached in the Obsidian manifest: the live archive takes a second or two, and a cache would be a second place for the format to drift. It's the **default view** because the owner asked for it; Chats is one key away, and the live analyzer keeps opening on Analysis.

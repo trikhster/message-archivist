@@ -73,8 +73,8 @@ const WELCOME = location.hash === '#welcome'; // first install: keep the setup s
 let tab = 'home';
 let routed = false;
 // The menu down the left: the archive's views (data-view, as the viewer names
-// them: chats, people, contacts…), then Home to Apps (data-tab).
-let archiveView = 'chats';
+// them: graph, chats, people, contacts…), then Home to Apps (data-tab).
+let archiveView = 'graph';
 function markMenu() {
   for (const b of document.querySelectorAll('nav.tabs button[data-tab]')) {
     const on = b.dataset.tab === tab && (tab !== 'archive' || b.dataset.view === archiveView);
@@ -131,7 +131,7 @@ function openArchive(hash = '') {
 // for Settings (Delete, no folder yet) by message (ma-settings), as it's in this page.
 addEventListener('message', (e) => {
   if (e.source !== $('archiveFrame').contentWindow) return;
-  if (e.data?.type === 'ma-view') { archiveView = String(e.data.view || 'chats'); markMenu(); return; }
+  if (e.data?.type === 'ma-view') { archiveView = String(e.data.view || 'graph'); markMenu(); return; }
   if (e.data?.type !== 'ma-settings') return;
   const h = String(e.data.hash || 'home');
   if (h.startsWith('delete:')) { showTab('backups'); askDelete(decodeURIComponent(h.slice(7)), false); }

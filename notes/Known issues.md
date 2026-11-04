@@ -1,6 +1,6 @@
 ---
 tags: [issues, review]
-updated: 2026-10-27
+updated: 2026-11-03
 reviewed_version: 0.5.0.0
 ---
 # Known issues
@@ -31,6 +31,8 @@ All four found in the 0.4.5.0 review were fixed before 0.4.5.0 was released (kep
 15. ~~**Every one-to-one WhatsApp chat exported from Android came in as a group**, asking "Which one is you?" and, if skipped, showing none of your messages as yours: any line without a sender made a group, and Android's "Messages and calls are end-to-end encrypted" notice has none in one-to-one chats too.~~ **Fixed** (unreleased): a group is more than two people, a group's notice, or two people in a chat named for neither ([[Importers]]).
 16. ~~**An iPhone's WhatsApp notices came in as messages**: from the contact ("end-to-end encrypted", "security code changed") or from the group's own name, which also counted as a person in the group.~~ **Fixed** (unreleased): a marked line under a group's own name, or saying what only WhatsApp says, is a notice.
 12. **The backup's time left is too low on a big phone** (live: 12 minutes left at 49%, still 15% to go 18 minutes later, though the phone was filling up). Measure on a run with room before changing `PhoneBackup.secondsLeft`.
+
+17. ~~**A person's Obsidian note showed the received share as "From you" in its years table**: a year's pair in the analysis is `[received, sent]`, and the table read it the other way round.~~ **Fixed** (unreleased, with the Graph view): the notes and the Graph view's profiles both read it as `[received, sent]`; `test/people/run.mjs` checks a year with nothing from you shows 0%.
 
 ## Tech debt
 - ~~**`gm-fetch` sends media as base64 over runtime messaging**~~ **Mostly fixed in 0.5.0.0**: during backups the [[Writer frame]] fetches and returns a Blob. `gm-fetch` remains the fallback (date-range zips, contact cards before a backup starts), with its 48 MB limit.
@@ -74,6 +76,9 @@ All four found in the 0.4.5.0 review were fixed before 0.4.5.0 was released (kep
 - **In the app, the Leave out switches are the app's own** (separate storage), for what's brought in there; the extension's govern its backups.
 
 ## Missing
+- **The Graph view analyses the archive each time the viewer opens** (a second or two on the live archive, with a progress line); the Obsidian manifest's cache of what each chat says isn't read. Fine today; a cache in the viewer would be the next step if archives grow much bigger.
+- **The graph's topics, mentions and events are English-leaning**, as the notes' are (the same `GMLib.analyse`): stopwords, everyday first names and the event phrases are English with a few other languages' wishes.
+- **A month can't be the focus of the graph yet** (a year can), and there's no period filter: the plan's Phase 4.1 lists both.
 - ~~**A big backup kept on Google Drive is heavy to keep up to date.** Drive can't add to a file, so each automatic run copied the whole file to the phone's cache, added what's new and uploaded it whole (the live test's backup with photos was 7.6 GB).~~ **Mostly fixed** (after 0.0.1.0): an optional updates file beside it ([[Android app]], `Daily.run`); the first live run wrote 19 KB instead of 7.6 GB. Still: a catch-up of the big file uploads it whole (rarely), and restoring takes two files. Since the phone copy (`PhoneCopy`) a catch-up no longer downloads it first; the copy keeps that room in use on the phone (Settings shows how much, and turning it off frees it). The updates file isn't offered by default; Settings suggests it.
 - **iMessage isn't importable yet.** Its database (`~/Library/Messages/chat.db`) is SQLite; reading it needs a small SQLite reader (plain JS, no dependencies), the `attributedBody` text of newer messages, `chat.db-wal` for the newest, and the Attachments folder. Signal has no plain export. See [[Sources]].
 - ~~**People are matched across apps by number or name only.**~~ **Done (unreleased)**: People ([[Sources]] → People) joins chats that share a number, email or app handle, suggests same-named ones, and lets the owner join, split, rename and keep apart by hand (`people.json`).

@@ -41,6 +41,7 @@
         "viewer.js",
         "library.js",
         "modules/*.js",
+        "graph.js",
         "theme.js",
         "theme.css",
         "writer.html",
